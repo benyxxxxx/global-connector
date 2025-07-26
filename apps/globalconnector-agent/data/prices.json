@@ -1,0 +1,54 @@
+{
+  "apple": {
+    "imported": "2.5$ per kg",
+    "local": "3$ per kg"
+  },
+  "banana": {
+    "imported": "0.8$ per kg",
+    "local": "1$ per kg"
+  },
+  "blueberry": {
+    "imported": "4$ per kg",
+    "local": "4.5$ per kg"
+  },
+  "cherry": {
+    "imported": "5.5$ per kg",
+    "local": "6$ per kg"
+  },
+  "grape": {
+    "imported": "3$ per kg",
+    "local": "3.5$ per kg"
+  },
+  "kiwi": {
+    "imported": "3.5$ per kg",
+    "local": "4$ per kg"
+  },
+  "mango": {
+    "imported": "1$ per kg",
+    "local": "2$ per kg"
+  },
+  "orange": {
+    "imported": "2$ per kg",
+    "local": "2.5$ per kg"
+  },
+  "peach": {
+    "imported": "2.5$ per kg",
+    "local": "3$ per kg"
+  },
+  "pineapple": {
+    "imported": "1.8$ per kg",
+    "local": "2.2$ per kg"
+  },
+  "plum": {
+    "imported": "2.3$ per kg",
+    "local": "2.8$ per kg"
+  },
+  "strawberry": {
+    "imported": "4.5$ per kg",
+    "local": "5$ per kg"
+  },
+  "watermelon": {
+    "imported": "1.2$ per kg",
+    "local": "1.5$ per kg"
+  }
+}

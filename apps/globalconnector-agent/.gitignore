@@ -1,0 +1,15 @@
+**/credentials
+test*
+*.test.*
+**/__pycache__
+.vscode
+**venv/
+*.env
+*cache*
+logs/*.log
+*.log
+.hypothesis
+**/models
+.ipynb_checkpoints/
+.DS_Store
+runs/

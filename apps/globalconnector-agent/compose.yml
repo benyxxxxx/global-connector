@@ -1,0 +1,25 @@
+services:
+  service_agent_bot:
+    build:
+      context: .
+    image: service-agent-bot:dev
+    env_file:
+      - .env
+    environment:
+      - TZ=Asia/Kathmandu
+    restart: unless-stopped
+    volumes:
+      - ./logs/:/app/logs/
+    ports:
+      - "8082:8082"
+    networks:
+      - service-network
+    command: uv run service_bot
+
+
+networks:
+  service-network:
+    driver: bridge
+
+volumes:
+  redis-data:
