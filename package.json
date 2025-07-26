@@ -3,6 +3,8 @@
   "private": true,
   "scripts": {
     "build": "turbo run build",
+    "dev:fastapi": "docker compose -f apps/service-api/docker-compose.yml up",
+    "dev:n8n": "docker compose -f apps/n8n/docker-compose.yml up",
     "dev": "turbo run dev",
     "lint": "turbo run lint",
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",
