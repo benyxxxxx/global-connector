@@ -1,32 +1,51 @@
-from fastapi import FastAPI, Depends, HTTPException
-from sqlmodel import Session, create_engine, SQLModel
-from app.schemas.memory import AgentMemoryCreate, AgentMemoryRead
+from fastapi import APIRouter, Depends, status, HTTPException, Query
 from typing import Optional
-from app.api.deps import get_booking_service
+
+from app.database import get_session
+from app.services.memory_service import MemoryService
+from app.schemas.memory import MemoryRead, MemoryCreateUpdate
+from app.security import get_current_user_id
+from .deps import get_memory_service
+
+router = APIRouter()
 
 
-@app.get("/memory", response_model=AgentMemoryRead)
+@router.get("/", response_model=MemoryRead)
 def read_memory(
-    user_id: Optional[str] = None,
-    agent_id: Optional[str] = None,
-    session: Session = Depends(get_session),
+    key: Optional[str] = Query(default=None),
+    user_id: Optional[str] = Query(default=None),
+    agent_id: Optional[str] = Query(default=None),
+    memory_service: MemoryService = Depends(get_memory_service),
+    current_user_id: str = Depends(get_current_user_id),
 ):
-    service = AgentMemoryService(session)
-    memory = service.get_memory(user_id=user_id, agent_id=agent_id)
+    memory = memory_service.get_memory(key=key, user_id=user_id, agent_id=agent_id)
+
+    if(user_id!=current_user_id):
+        raise HTTPException(status_code=401, detail="Unable to get memory, user must be same")
+
     if not memory:
         raise HTTPException(status_code=404, detail="Memory not found")
     return memory
 
 
-@app.post("/memory", response_model=AgentMemoryRead)
+@router.post(
+    "/",
+    response_model=MemoryRead,
+    status_code=status.HTTP_201_CREATED,
+)
 def save_memory(
-    memory_in: AgentMemoryCreate, session: Session = Depends(get_session)
+    memory_in: MemoryCreateUpdate,
+    memory_service: MemoryService = Depends(get_memory_service),
+    current_user_id: str = Depends(get_current_user_id),
 ):
-    service = AgentMemoryService(session)
-    memory = service.save_memory(
+
+    if(memory_in.user_id!=current_user_id):
+        raise HTTPException(status_code=401, detail="Unable to save memory, user must be same")
+
+    memory = memory_service.save_memory(
+        memory_text=memory_in.memory,
+        key=memory_in.key,
         user_id=memory_in.user_id,
         agent_id=memory_in.agent_id,
-        memory=memory_in.memory,
-        memory_type=memory_in.memory_type,
     )
     return memory

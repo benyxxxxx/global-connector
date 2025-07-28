@@ -4,6 +4,7 @@ from sqlmodel import Session
 from app.services.business_service import BusinessService
 from app.services.manage_service import ServiceManager
 from app.services.booking_service import BookingService
+from app.services.memory_service import MemoryService
 from app.services.payment_service import PaymentService
 
 from app.database import get_session
@@ -29,8 +30,8 @@ def get_booking_service(
 
 def get_memory_service(
     session: Session = Depends(get_session),
-) -> BookingService:
-    return BookingService(session)
+) -> MemoryService:
+    return MemoryService(session)
 
 
 def get_payment_service(
