@@ -1,0 +1,5 @@
+# flyctl launch added from .gitignore
+**/.env
+**/n8n_storage
+**/*.pem
+fly.toml

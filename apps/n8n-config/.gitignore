@@ -1,0 +1,5 @@
+.env
+n8n_storage
+*.pem
+.env.dev
+.env.prod
