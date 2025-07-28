@@ -1,15 +1,13 @@
-from typing import Optional
-from datetime import datetime
+# app/models/memory.py
 from sqlmodel import SQLModel, Field
+from typing import Optional
 from uuid import UUID, uuid4
+from datetime import datetime
 
 
 class Memory(SQLModel, table=True):
-    __tablename__ = "memories"
-
-    id: UUID = Field(default_factory=uuid4, primary_key=True)
-    key: Optional[str] = Field(default=None, index=True)  # e.g. "user_preferences", "session_123_memory"
-    user_id: Optional[str] = Field(default=None, index=True)
-    agent_id: Optional[str] = Field(default=None, index=True)
-    memory: str  # text blob
-    updated_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    id: UUID = Field(default_factory=uuid4, primary_key=True, index=True)
+    user_id: str = Field(index=True)
+    reference: str = Field(index=True)
+    memory: str
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
