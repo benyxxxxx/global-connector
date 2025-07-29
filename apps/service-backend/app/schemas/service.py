@@ -6,6 +6,7 @@ from app.models.service import Variant, PricingTier, PricingType, TimeUnit
 
 
 class ServiceBase(BaseModel):
+    business_name: Optional[str]
     name: str
     description: Optional[str] = None
     # business_id: str
@@ -26,6 +27,7 @@ class ServiceBase(BaseModel):
 
 # Request/Response Models
 class ServiceCreate(BaseModel):
+    business_name: str
     name: str
     description: Optional[str] = None
     # business_id: str
@@ -45,6 +47,7 @@ class ServiceCreate(BaseModel):
 
 
 class ServiceUpdate(BaseModel):
+    business_name: Optional[str] = None
     name: Optional[str] = None
     description: Optional[str] = None
     pricing_model: Optional[PricingType] = None

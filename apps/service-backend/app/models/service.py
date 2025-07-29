@@ -68,6 +68,7 @@ class Service(SQLModel, table=True):
     id: str = Field(primary_key=True)
 
     name: str = Field(index=True)
+    business_name: Optional[str] = Field(default=None, nullable=True)
     description: Optional[str] = None
     # business_id: str = Field(foreign_key="businesses.id", index=True)
     owner_id: str = Field(index=True)
