@@ -1,0 +1,951 @@
+{
+  "name": "Service Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Not a bot?').isExecuted }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    },
+                    "id": "84eaf365-39c9-4bda-ad1e-e58add1b305e"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "a55a7aea-1a0b-43ed-93b5-d9657b7a5138",
+                    "leftValue": "={{ $('When chat message received').isExecuted }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        208,
+        -304
+      ],
+      "id": "45a59f03-445f-49f8-83f4-cfa87d5931f1",
+      "name": "Switch1"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -1232,
+        -64
+      ],
+      "id": "1e8a3a42-db68-439c-b53d-a1a34d429bae",
+      "name": "When chat message received",
+      "webhookId": "87d50f23-dea7-45b0-a1b1-92804e1dcd3a"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "2c069094-48ee-49f3-96c0-5ba7a9a99c3b",
+              "leftValue": "={{ $json.message.from.is_bot }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1232,
+        -336
+      ],
+      "id": "4c7b8d7c-138c-40cb-9b9f-98b32a15bf65",
+      "name": "Not a bot?"
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Input').item.json.session_id }}",
+        "contextWindowLength": 10
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.3,
+      "position": [
+        -336,
+        400
+      ],
+      "id": "1606f49a-58ad-4cb5-a1ef-957bcb0b0f47",
+      "name": "Postgres Chat Memory",
+      "credentials": {
+        "postgres": {
+          "id": "Ohs4URthvlZFje3t",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        -480,
+        416
+      ],
+      "id": "c95f47cc-9852-480b-b550-16ee25f24550",
+      "name": "OpenRouter Chat Model",
+      "credentials": {
+        "openRouterApi": {
+          "id": "Bto8OjBEqOuYPs53",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $('Input').item.json.message }}",
+        "options": {
+          "systemMessage": "=<role>\nYou are the GlobalConnector Service Agent (`@globalconnector_service_bot`), a friendly, helpful assistant for managing services, bookings, payments, and messages via Telegram.\n</role>\n\n<instructions>\n\n<goal>\nHelp users manage their GlobalConnector services easily with clear, friendly conversation.\n</goal>\n\n<context>\n\n### 🔧 Tools (use only when needed):\n- Service Management\n- Booking Management\n- Payment Handling\n- Telegram Messaging\n- User Info\n- Save Memory\n\n✔️ Always confirm important info before taking action.\n\n---\n\n### ➕ Adding a Service\n\n- Check <user-memory> for business name.\n- If not found:\n  - Ask: “What’s the name of your business?”\n  - Save it silently once provided by calling Save Memory tool.\n- If found:\n  - Use that business name and continue with service setup.\n\n🧠 No need to handle multiple businesses for now.\n\n---\n\n### 💬 Style\n- Be friendly and direct  \n- Use simple, natural language  \n- Don’t mention tools or memory  \n\n---\n\n### 📩 Messaging Rules\n- Send messages quickly  \n- Escape underscores in usernames  \n- Use format: `@user\\_name, [message]`  \n\n---\n\n### 📅 Now  \n`{{ $now.toISO() }}`  \n\n---\n\n<user-memory>\n`{{ $('Get Memory').item.json.memory }}`\n</user-memory>\n\n</context>\n\n<output_format>\n- Clear and professional tone  \n- Use user info if available  \n- Don’t mention next steps or instructions  \n- Don’t expose internal logic  \n</output_format>\n\n</instructions>\n"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        -224,
+        -144
+      ],
+      "id": "09e9b6cd-7a3b-47de-9001-12dc9be89433",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "toolDescription": "=You are an AI assistant helping users add services to their GlobalConnector business.\n\n🎯 Goal:  \nMake adding services simple, smooth, and natural. Be friendly, clear, and helpful.\n\n<user-memory>  \n{{ $('Get Memory').item.json.memory }}  \n</user-memory>\n\n---\n\n### 🧭 Flow\n\n1. Ask the user to describe their service and how they charge—keep it natural.\n\n2. Collect these details:\n- **Business name** (required)  \n  - If known from memory, confirm casually.  \n  - If unknown, ask naturally.  \n  - If user mentions a valid business name not in memory, silently save it.\n- **Service name** (required)  \n- **Pricing model** (infer from user input)  \n- **Price** (required; store as `base_price`)  \n- **Currency** (3-letter code, required)  \n- **Description** (summarize if missing)  \n- **Time unit**, **min/max duration** (only if time-based)  \n- **Additional attributes** (optional)\n\n3. If anything is missing or unclear, ask naturally—avoid scripts or fixed wording.\n\n4. ✅ **Summarize collected info** clearly, like:  \n“Here’s what I have so far: …”  \nAsk: “Would you like to change anything?”\n\n5. If updates are needed, handle them. Then confirm.\n\n6. On confirmation, send a clean JSON with **only the fields provided**, like:\n\n```json\n{\n  \"business_name\": \"string\",\n  \"name\": \"string\",\n  \"description\": \"string\",\n  \"pricing_model\": \"flat\" | \"time_based\",\n  \"currency\": \"string\",\n  \"base_price\": \"string | number\",\n  \"time_unit\": \"minute\" | \"hour\" | \"day\" | \"week\" | \"month\" | \"year\",\n  \"min_duration\": 0,\n  \"max_duration\": 0,\n  \"attributes\": {\n    \"key\": \"value\"\n  }\n}\n",
+        "method": "POST",
+        "url": "={{ $('Input').item.json.api_url }}/api/services/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Content_Type', ``, 'string') }}",
+        "body": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Body', `use json formatted service data`, 'string') }}",
+        "options": {
+          "redirect": {
+            "redirect": {}
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [
+        176,
+        288
+      ],
+      "id": "61f6256e-fe8d-440b-852d-970b332012a6",
+      "name": "Add service",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "IFbK1w8QKm2csUSI",
+          "name": "Service Auth Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "Only use this tool when the user wants to see the services they have personally added.\n\nDo not use this tool if the user is browsing or searching to buy or rent services from others.\n\nWhen returning the list, format it in a clean table using Telegram-compatible monospaced code block (use triple backticks).\n\nFormat each service like:\n\n1. Service Name   | Pricing Model | Price   | ID: service_id\n\n- Align columns using spaces so it's easy to read.\n- Replace \"time_based\" with \"Time-based\" and \"flat\" with \"Flat\".\n- Include the service ID so the user can reference it.\n- After listing, prompt the user:  \n  \"Reply with the number if you want to update or delete a service.\"",
+        "url": "={{ $('Input').item.json.api_url }}/api/services/my/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [
+        320,
+        288
+      ],
+      "id": "1082c6db-9564-4d8d-91c5-f76a23a3f9fd",
+      "name": "List My Services",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "IFbK1w8QKm2csUSI",
+          "name": "Service Auth Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "sendChatAction",
+        "chatId": "={{ $('Input').item.json?.chat_id }}"
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -512,
+        -272
+      ],
+      "id": "cd5af068-1eb3-4059-9b62-11e58a50e379",
+      "name": "Send a chat action",
+      "webhookId": "34448450-71aa-43d4-9d96-a01e10cd1720",
+      "credentials": {
+        "telegramApi": {
+          "id": "BLFcy3fCAlEhjFkD",
+          "name": "Global Connector Service Bot"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "toolDescription": "Use this tool to show public services the user can book or explore.\n\nIf they mention a type (e.g. \"massage\", \"motorcycle\"), extract a short keyword and use it as `?q`. If browsing generally, no query needed.\n\nShow 5–10 results in this format:\n\n1. Service Name — $Price — ID: `service_id`\n\nAlways include the ID in backticks — it's used to book or view details.\n\nExample:\n\n1. Motorcycle Rental — $30 — ID: `a1b2c3`  \n2. Scooter Hire — $15/hour — ID: `d4e5f6`\n\nEnd with:  \n\"Reply with the number or ID (e.g. `a1b2c3`) to view or book a service.\"\n\nWait for user input before doing anything else.\n",
+        "url": "={{ $('Input').item.json.api_url }}/api/services/?q={{ $fromAI(\"q\", \"search query parameter\") }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [
+        640,
+        288
+      ],
+      "id": "f6a3613c-683d-44c2-b9a4-c69c8cd0a0b3",
+      "name": "Browse Services",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "IFbK1w8QKm2csUSI",
+          "name": "Service Auth Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "Use this tool to fetch detailed information about a specific service.\n\nIt requires a service_id as input.\n\nIf the user selects a service by number (e.g. \"show me service 2\"), use the service list previously shown to map that number to the correct service_id.\n\nOnly call this tool if the user has selected a valid service from the list.\n\nAfter fetching the details, display them in a clear Telegram-friendly format, including:\n- Name\n- Description\n- Pricing model (Flat or Time-based)\n- Base price and currency\n- Time unit, min/max duration (if time-based)\n- Any attributes or tags\n\nExample:\n\n📌 **Haircut by Alex**  \n💬 Quick and clean men's haircut  \n💰 Flat — $30 USD  \n🔖 Category: Grooming\n\nThen ask:\n\"Would you like to book this service?\"\n\nWait for the user's response before taking action.",
+        "url": "={{ $('Input').item.json.api_url }}/api/services/{{ $fromAI(\"serviceId\") }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        256
+      ],
+      "id": "c73c946c-ac06-4802-a823-d18ebb6f2368",
+      "name": "Service Detail",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "IFbK1w8QKm2csUSI",
+          "name": "Service Auth Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "Use this tool to update a service the user owns.\n\n1. The user will select a service either by number or by ID from their service list.  \nIf they choose by number, resolve the correct service_id from the list shown earlier.\n\n2. Show the current details of the selected service to the user in a friendly format.\n\n3. Ask what they want to update, using clear, human-friendly language. Do not use technical terms like \"pricing_tiers\".\n\nAsk questions like:\n- Do you want to change the service name or description?\n- Do you want to adjust the price or change how pricing works (fixed price or charged by time)?\n- What’s the new price and currency?\n\nIf the service is time-based:\n- Ask if they want to update the time unit (e.g. minute, hour), minimum or maximum time users can book.\n- Ask: “Do you offer different prices based on duration? (e.g. cheaper per hour for longer bookings)”  \n  If yes, collect each tier as: duration + price (e.g. 60 minutes for $50)\n\n4. After collecting changes, confirm with the user before submitting.\n\nUse the following format for the PATCH request (only include fields the user wants to update):\n\n{\n  \"name\": \"string\",\n  \"description\": \"string\",\n  \"pricing_model\": \"flat\",\n  \"currency\": \"string\",\n  \"base_price\": 0,\n  \"time_unit\": \"minute\",\n  \"min_duration\": 0,\n  \"max_duration\": 0,\n  \"pricing_tiers\": [\n    {\n      \"duration\": 0,\n      \"price\": 0\n    }\n  ]\n}\n\nCall the tool with the `service_id` and updated fields. Then confirm the update to the user.\n",
+        "method": "PATCH",
+        "url": "={{ $('Input').item.json.api_url }}/api/services/{{ $fromAI(\"serviceId\") }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Content_Type', ``, 'string') }}",
+        "body": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Body', ``, 'string') }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        272
+      ],
+      "id": "f2958d58-cc0a-479c-8834-0731571e2c17",
+      "name": "Update Service",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "IFbK1w8QKm2csUSI",
+          "name": "Service Auth Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "Use this tool when the user wants to delete a service they own.\n\n1. If the user hasn't selected a service yet:\n   - Show them a list of their own services (use the previous list if available).\n   - Ask: “Which service would you like to delete?”  \n     They can reply with the number or ID.\n\n2. If the user already selected a service (by number or ID):\n   - Resolve the correct service_id from the previous list if needed.\n   - Confirm with the user before deleting:\n     “Are you sure you want to delete this service? This action cannot be undone.”\n\n3. Only call this tool after the user clearly confirms the deletion.\n\nPass the service_id as input and let the user know once deletion is successful.\n",
+        "method": "DELETE",
+        "url": "={{ $('Input').item.json.api_url }}/api/services/{{ $fromAI(\"serviceId\") }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [
+        976,
+        256
+      ],
+      "id": "54dd7268-7158-462b-83a9-7658d232bc70",
+      "name": "Delete Service",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "IFbK1w8QKm2csUSI",
+          "name": "Service Auth Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "Use this tool when the user wants to book a service they found while browsing or exploring.\n\n1. Get the `service_id` from the user's selection:\n   - If they reply with a number, resolve it to the correct ID from the list you previously showed.\n   - If they provide a service name or unclear reference (not a known ID or number), search using the `Browse Services` tool with the name as the query (?q).\n   - From search results, identify and extract the correct `service_id`.\n\n2. Call the service detail tool with the `service_id` to fetch the latest service data.\n   - Use this to determine `pricing_model`, `time_unit`, and any custom `attributes`.\n\n3. Ask the user:\n   - “When would you like to book this service?”  \n     → Convert their reply into an ISO 8601 datetime string (`scheduled_at`)\n\n4. If the service uses time-based pricing:\n   - Use the `time_unit` from the service detail (e.g. minute, hour, day)\n   - Ask: “For how many [time_unit] would you like to book it?”  \n     → Example: “How many hours?”\n\n5. If the service has custom attributes:\n   - Ask in natural language, e.g.:\n     - “Where should the service be delivered?”\n     - “Any special instructions?”\n\n6. Summarize all booking details and ask the user to confirm before submitting.\n\n---\n\n🔹 Required fields:\n- `service_id`\n- `scheduled_at`\n- `duration` (only if time-based)\n\n🔸 Format to send:\n```json\n{\n  \"service_id\": \"string\",\n  \"scheduled_at\": \"ISO string with date and time hour\",\n  \"duration\": number (if time-based),\n  \"attributes\": {\n    \"key\": \"value\"\n  }\n}\n",
+        "method": "POST",
+        "url": "={{ $('Input').item.json.api_url }}/api/bookings/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Content_Type', ``, 'string') }}",
+        "body": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Body', ``, 'string') }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [
+        512,
+        -48
+      ],
+      "id": "90faf810-80f0-4866-910f-d5f0b7e0d5b3",
+      "name": "Book Service",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "IFbK1w8QKm2csUSI",
+          "name": "Service Auth Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "Use this tool when the user wants to view their current or past service bookings.\n\n1. Fetch the user's bookings.\n2. Display 5–10 relevant results, prioritizing upcoming bookings.\n\nFormat each booking in a Telegram-friendly way like:\n\n1. Service Name  \n   • Booking ID: abc123  \n   • Scheduled at: 2025-07-30 14:00  \n   • Duration: 2 hours  \n   • Payment Status: Paid\n\nAfter the list, ask:\n\"Would you like to view details, or make a payment for a booking?  \nReply with the number or Booking ID.\"\n\nWait for the user’s response before calling any other tool.\n",
+        "url": "={{ $('Input').item.json.api_url }}/api/bookings/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [
+        672,
+        -32
+      ],
+      "id": "101e5425-a846-45f6-86e2-66c3c5f62364",
+      "name": "My Bookings",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "IFbK1w8QKm2csUSI",
+          "name": "Service Auth Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "Use this tool when the user wants to make a payment for a specific booking.\n\n1. Get the `booking_id` from the user’s selection (number or Booking ID) in their booking list.\n   - If selected by number, resolve it to the correct `booking_id`.\n\n2. Ask the user:\n“How would you like to pay? (Available: Mandel Coin)”\n\n3. If they confirm Mandel Coin or do not specify anything else, use:\n{\n  \"booking_id\": \"resolved_id\",\n  \"payment_method\": \"mandel_coin\"\n}\n\n4. After the request, show the user:\n\n✅ Payment link: [Payment URL]  \n🔁 Payment ID: [payment_id]  \n\nFormat the payment link as a markdown hyperlink:  \n✅ Payment link: [Pay here](Payment URL)\n\nLet them know they can click the link to complete payment and use the Payment ID to check the status.\n\nWait for user confirmation before calling this tool.\n",
+        "method": "POST",
+        "url": "={{ $('Input').item.json.api_url }}/api/payments/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Content_Type', ``, 'string') }}",
+        "body": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Body', ``, 'string') }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [
+        848,
+        -16
+      ],
+      "id": "d1be64a7-b36a-4128-87e3-dc1bf94bb1c8",
+      "name": "Make Payment",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "IFbK1w8QKm2csUSI",
+          "name": "Service Auth Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "Use this tool when the user:\n\n- Wants to check the payment status of a booking, OR  \n- Mentions they want to make a payment and you need to verify if a payment request already exists.\n\nSteps:\n\n1. If the user has not selected a booking yet:\n   - Show their bookings (up to 10), then ask them to select by number or Booking ID.\n\n2. If selected by number, resolve to the correct `booking_id`.\n\n3. Call this tool with:\n{\n  \"booking_id\": \"resolved_id\"\n}\n\nAfter the call:\n\n- If the payment is **already completed**, respond with:\n🧾 Booking: [Service Name]  \n✅ Payment Status: Paid  \n🕒 Scheduled at: [datetime]\n\n- If the payment is **pending/unpaid**, respond with:\n🧾 Booking: [Service Name]  \n⏳ Payment Status: Pending  \n🔗 Payment Link: [Pay here](payment_url)  \n💳 Payment Method: Mandel Coin\n\nThen say:\n\"You can complete the payment using the link above. Let me know once done if you'd like me to check again.\"\n\nOnly provide the payment link if it’s already generated and not yet paid.\n",
+        "url": "={{ $('Input').item.json.api_url }}/api/payments/?booking_id={{ $fromAI(\"booking_id\", \"booking id\") }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Content_Type', ``, 'string') }}",
+        "body": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Body', ``, 'string') }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [
+        992,
+        -16
+      ],
+      "id": "e1cc0484-81f9-4780-961d-aae1ef14204d",
+      "name": "Check Payment Status",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "IFbK1w8QKm2csUSI",
+          "name": "Service Auth Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Not a bot?').item.json.message.chat.id }}",
+        "text": "={{ $('AI Agent').item.json.output }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "reply_to_message_id": "={{ $('Not a bot?').item.json.message.message_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        464,
+        -416
+      ],
+      "id": "f435c454-0f33-4432-b166-a48b98e5c88e",
+      "name": "Send a text message",
+      "webhookId": "8e0adcf9-7023-4ae0-852b-3dda9e28b66f",
+      "credentials": {
+        "telegramApi": {
+          "id": "BLFcy3fCAlEhjFkD",
+          "name": "Global Connector Service Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "61b402f3-b709-478e-a5d7-400af26ccf0a",
+              "name": "output",
+              "value": "={{ $('AI Agent').item.json.output }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        464,
+        -224
+      ],
+      "id": "85ce257b-e2f0-4515-ab19-447776b33aa8",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.api_url }}/api/memory/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "reference",
+              "value": "={{ $json.user_id}}-service-bot"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -512,
+        -64
+      ],
+      "id": "2b6fb0f0-68cc-4b35-9462-c35340f367ad",
+      "name": "Get Memory",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "IFbK1w8QKm2csUSI",
+          "name": "Service Auth Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "dfb39348-8ce6-4249-992a-e3f7bbe97807",
+              "leftValue": "={{ $json.message.text.toLowerCase().split(' ').slice(0, 3) }}",
+              "rightValue": "ai",
+              "operator": {
+                "type": "array",
+                "operation": "contains",
+                "rightType": "any"
+              }
+            },
+            {
+              "id": "fea19a63-6532-4e0a-8214-feaca068c346",
+              "leftValue": "={{ $json.message.text.trim().substring(0,50) }}",
+              "rightValue": "@globalconnector",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            },
+            {
+              "id": "9f272096-e9bb-4b15-8b75-710bfa1d8626",
+              "leftValue": "={{ $json?.message?.chat?.type }}",
+              "rightValue": "private",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1040,
+        -352
+      ],
+      "id": "82e9e70c-daec-4b32-abd8-3142cee580ca",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1440,
+        -336
+      ],
+      "id": "c72d2c6e-6f5e-4db1-a914-ca0c392a8d53",
+      "name": "Telegram Trigger",
+      "webhookId": "f38fcd23-303f-4667-a212-0b3aa9f3116f",
+      "credentials": {
+        "telegramApi": {
+          "id": "BLFcy3fCAlEhjFkD",
+          "name": "Global Connector Service Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"message\": \"{{ $json?.message?.text || $json.chatInput}}\",\n  \"user_id\": \"{{ $json?.message?.from?.id || $json?.sessionId }}\",\n  \"message_from_id\": \"{{ $json?.message?.from?.id || '' }}\",\n  \"chat_id\": \"{{ $json?.message?.chat?.id || '' }}\",\n  \"api_url\": \"https://global-connector-service.fly.dev\",\n  \"session_id\": \"{{ $json?.message?.from?.id || $json.sessionId }}\",\n  \"memory_reference_id\": \"{{ $json?.message?.from?.id || $json?.sessionId }}-service-bot\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -896,
+        -192
+      ],
+      "id": "f8fa81b5-ada1-4372-bcac-50a8cb352f43",
+      "name": "Edit Input"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Add a new field called 'myNewField' to the JSON of the item\nconst jwt = require(\"jsonwebtoken\")\n\nconst KEY_DEV = 'global-connector-dev-secret-key';\nconst KEY_PROD = '4d5f9d5c79e6660e1969f80ff10d6a9b070e6496e393128c3914bbcf3b7e769a'\n\nconst key = KEY_PROD;\n\nconst auth_token = jwt.sign({user_id: $json.user_id}, key)\n\n// set api token output\n$input.item.json.api_token = auth_token;\n\nreturn $input.item;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -736,
+        -176
+      ],
+      "id": "7c54cdfa-56b6-4e50-ae4e-0e3f5ea50664",
+      "name": "Input"
+    },
+    {
+      "parameters": {
+        "toolDescription": "=### 🧠 Memory Tool Instructions\n\nUse this tool to capture useful info the user shares — like their name, preferences, referrals, business names, or instructions — as **bullet points in a single string**.\n\n✅ Append new items to the existing memory  \n✅ Save only clear, relevant, and concise points  \n✅ If the user mentions a business they own or manage, store it as:  \n  - Owns business: [Business Name]  \n✅ Remove or update items if the user asks  \n❌ Never mention memory or that you're saving anything — just continue the conversation naturally\n\n**Format memory as a single newline-separated list**, for example:\n- Prefers morning appointments  \n- Lives in Midtown  \n- Referred by Sarah  \n- Owns business: SwiftClean Services\n\n<existing-memory>  \n{{ $('Get Memory').item.json.memory }}  \n</existing-memory>\n\nOnly save what’s genuinely worth remembering.\n",
+        "method": "POST",
+        "url": "=https://global-connector-service.fly.dev/api/memory/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "reference",
+              "value": "={{ $('Input').item.json.memory_reference_id }}"
+            },
+            {
+              "name": "memory",
+              "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('parameters1_Value', ``, 'string') }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [
+        -176,
+        400
+      ],
+      "id": "f50dac73-cfcf-499b-a5c5-0c2b5bce738e",
+      "name": "Save Memory",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "IFbK1w8QKm2csUSI",
+          "name": "Service Auth Token"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Switch1": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "Edit Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Not a bot?": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Switch1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Chat Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add service": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List My Services": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Browse Services": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Service Detail": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Service": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete Service": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Book Service": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "My Bookings": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Make Payment": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Payment Status": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Memory": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Edit Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Not a bot?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Input": {
+      "main": [
+        [
+          {
+            "node": "Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Input": {
+      "main": [
+        [
+          {
+            "node": "Get Memory",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send a chat action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Memory": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "701cf290-8b13-46f8-ad5f-0549c138ec3a",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "5f852527a4bce7810c537c4420c697c5ec02a52d4e9f30bbd8bd0f0e473ce245"
+  },
+  "id": "6VgnySayzxoiSbmy",
+  "tags": [
+    {
+      "createdAt": "2025-07-25T03:49:40.041Z",
+      "updatedAt": "2025-07-25T03:49:40.041Z",
+      "id": "lQStGe72js87ZnON",
+      "name": "service"
+    }
+  ]
+}
