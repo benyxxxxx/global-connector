@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends, status, HTTPException
 from app.database import get_session
+from datetime import datetime
 from app.services.memory_service import MemoryService
+from app.utils.ids import generate_unique_id
 from app.schemas.memory import MemoryRead, MemoryCreateUpdate
 from app.security import get_current_user_id
 from .deps import get_memory_service
@@ -15,7 +17,7 @@ def read_memory(
 ):
     memory = memory_service.get_memory(reference=reference, user_id=current_user_id)
     if not memory:
-        raise HTTPException(status_code=404, detail="Memory not found")
+        return MemoryRead(memory='', id=generate_unique_id(), reference='', updated_at=datetime.now())
     return memory
 
 @router.post(
