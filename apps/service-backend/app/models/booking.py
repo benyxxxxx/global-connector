@@ -15,6 +15,7 @@ class BookingStatus(str, Enum):
 class Booking(SQLModel, table=True):
     __tablename__ = "bookings"
 
+    full_name: str = Field(index=True)
     id: str = Field(primary_key=True, index=True)
     service_id: str = Field(index=True, foreign_key="services.id")
     user_id: str = Field(index=True)

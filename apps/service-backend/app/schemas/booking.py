@@ -18,7 +18,7 @@ class BookingBase(BaseModel):
     duration: Optional[int]
     status: BookingStatus = BookingStatus.PENDING
     attributes: Optional[Dict[str, Any]] = None
-
+    full_name: str
 
 class BookingCreate(BaseModel):
     service_id: str
@@ -27,6 +27,7 @@ class BookingCreate(BaseModel):
     duration: Optional[int]
     attributes: Optional[Dict[str, Any]] = None
     force_add: Optional[bool] = None
+    full_name: str
 
 
 class BookingCreateValidated(BookingCreate):
