@@ -96,6 +96,11 @@ class Service(SQLModel, table=True):
 
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    
+    location: Optional[str] = Field(default=None, index=True)
+    place: Optional[bool] = Field(default=False)
+    delivery: Optional[bool] = Field(default=False)
+    requires_booking: Optional[bool] = Field(default=False)
 
     bookings: List["Booking"] = Relationship(back_populates="service")
     # business: Optional["Business"] = Relationship(back_populates="services")
