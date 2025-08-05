@@ -18,6 +18,11 @@ class ServiceBase(BaseModel):
     time_unit: Optional[TimeUnit] = None
     min_duration: Optional[int] = None
     max_duration: Optional[int] = None
+    
+    location: Optional[str] = None
+    place: Optional[bool] = False
+    delivery: Optional[bool] = False
+    requires_booking: Optional[bool] = False
 
     # pricing_tiers: Optional[List[PricingTier]] = None
     # variants: Optional[List[Variant]] = None
@@ -40,6 +45,11 @@ class ServiceCreate(BaseModel):
     min_duration: Optional[int] = None
     max_duration: Optional[int] = None
 
+    location: Optional[str] = None
+    place: Optional[bool] = False
+    delivery: Optional[bool] = False
+    requires_booking: Optional[bool] = False
+    
     # pricing_tiers: Optional[List[PricingTier]] = None
     # variants: Optional[List[Variant]] = None
 
@@ -57,6 +67,11 @@ class ServiceUpdate(BaseModel):
     time_unit: Optional[TimeUnit] = None
     min_duration: Optional[int] = None
     max_duration: Optional[int] = None
+    
+    location: Optional[str] = None
+    place: Optional[bool] = None
+    delivery: Optional[bool] = None
+    requires_booking: Optional[bool] = None
 
     pricing_tiers: Optional[List[PricingTier]] = None
     # variants: Optional[List[Variant]] = None
@@ -70,3 +85,6 @@ class ServiceResponse(ServiceBase):
     # business_id: str
     created_at: datetime
     updated_at: datetime
+
+    class Config:
+        from_attributes = True 
