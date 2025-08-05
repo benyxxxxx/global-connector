@@ -5,6 +5,9 @@ from app.services.manage_service import ServiceManager
 from app.security import get_current_user_id
 from .deps import get_service_manager
 
+from sqlmodel import Session, select
+from app.database import get_session
+from app.models.service import Service
 
 router = APIRouter(dependencies=[Depends(get_current_user_id)])
 
@@ -62,3 +65,12 @@ def delete_service(
 ):
     service_manager.delete(service_id, current_user_id)
     return None
+
+# add catalog endpoint
+@router.get("/catalog/", response_model=List[ServiceResponse])
+def get_service_catalog(session: Session = Depends(get_session)):
+    """
+    Retrieve the full, categorized service catalog.
+    """
+    services = session.exec(select(Service)).all()
+    return services
