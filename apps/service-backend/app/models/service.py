@@ -12,6 +12,7 @@ from sqlmodel import (
     DECIMAL,
 )
 from pydantic import BaseModel, ConfigDict, model_validator
+from .service_category import ServiceCategory
 
 
 # Enums
@@ -66,7 +67,8 @@ class Service(SQLModel, table=True):
     __tablename__ = "services"
 
     id: str = Field(primary_key=True)
-
+    category_id: Optional[int] = Field(default=None, foreign_key="service_categories.id")
+    service_category: Optional[ServiceCategory] = Relationship(back_populates="services")
     name: str = Field(index=True)
     business_name: Optional[str] = Field(default=None, nullable=True)
     description: Optional[str] = None
