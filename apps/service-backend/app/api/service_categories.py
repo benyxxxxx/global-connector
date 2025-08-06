@@ -7,7 +7,8 @@ from app.schemas.service_category import ServiceCategoryCreate, ServiceCategoryR
 from app.security import get_current_user_id
 
 # The prefix and tags will be handled in router.py
-router = APIRouter(dependencies=[Depends(get_current_user_id)])
+# router = APIRouter(dependencies=[Depends(get_current_user_id)])
+router = APIRouter()
 
 @router.post("/", response_model=ServiceCategoryResponse, status_code=status.HTTP_201_CREATED)
 def create_service_category(service_category: ServiceCategoryCreate, db: Session = Depends(get_session)):

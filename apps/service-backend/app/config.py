@@ -14,7 +14,11 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ALLOWED_HOSTS: List[str] = ["*"]
 
-    model_config = SettingsConfigDict(env_file=".env")
+    model_config = SettingsConfigDict(
+    env_file=".env",
+    extra="ignore"  
+    )
+
 
     SOLANA_DESTINATION_ADDRESS: str
     MANDEL_COIN_MINT_ADDRESS: str
