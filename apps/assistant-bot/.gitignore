@@ -1,0 +1,16 @@
+__pycache__
+env
+venv
+*.pyc
+*.pyo
+*.pyd
+.env
+.env.prod
+.env.dev
+.env.local
+.venv
+.vscode
+Pipfile.lock
+connector.db
+.pytest_cache
+test.db
