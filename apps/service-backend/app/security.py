@@ -9,7 +9,7 @@ security = HTTPBearer()
 
 
 class TokenData:
-    def __init__(self, user_id: int):
+    def __init__(self, user_id: str): 
         self.user_id = user_id
 
 
@@ -25,7 +25,7 @@ def verify_jwt_token(token: str) -> TokenData:
             options={"verify_aud": False},
         )
 
-        user_id: int = payload.get("user_id")
+        user_id = payload.get("user_id")
         if user_id is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -33,7 +33,8 @@ def verify_jwt_token(token: str) -> TokenData:
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        return TokenData(user_id=user_id)
+        # Ensure user_id is returned as a string
+        return TokenData(user_id=str(user_id))
 
     except ExpiredSignatureError:
         raise HTTPException(
@@ -41,7 +42,7 @@ def verify_jwt_token(token: str) -> TokenData:
             detail="Token has expired",
             headers={"WWW-Authenticate": "Bearer"},
         )
-
+    
     except JWTError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -55,11 +56,12 @@ def verify_jwt_token(token: str) -> TokenData:
             detail="Authentication failed",
             headers={"WWW-Authenticate": "Bearer"},
         )
+        
 
 
 def get_current_user_id(
     credentials: HTTPAuthorizationCredentials = Depends(security),
-) -> int:
+) -> str: # CHANGED to str
     """
     Dependency to get current user ID from JWT token
     Use this in your route handlers
