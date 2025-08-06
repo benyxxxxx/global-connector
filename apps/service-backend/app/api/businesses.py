@@ -9,9 +9,11 @@ from app.services.business_service import BusinessService
 from app.api.deps import get_business_service
 from app.security import get_current_user_id
 
-router = APIRouter(dependencies=[Depends(get_current_user_id)])
+# 1. REMOVED global dependency to make endpoints public by default
+router = APIRouter()
 
 
+# 2. This endpoint remains PROTECTED
 @router.post("/", response_model=BusinessResponse, status_code=status.HTTP_201_CREATED)
 async def create_business(
     business_in: BusinessCreate,
@@ -22,6 +24,7 @@ async def create_business(
     return business_service.create(business_in, current_user_id)
 
 
+# 3. This endpoint is now PUBLIC
 @router.get("/", response_model=List[BusinessResponse])
 async def get_businesses(
     business_service: BusinessService = Depends(get_business_service),
@@ -30,6 +33,7 @@ async def get_businesses(
     return business_service.get_all()
 
 
+# 4. This endpoint remains PROTECTED
 @router.get("/my", response_model=List[BusinessResponse])
 async def get_owner_businesses(
     business_service: BusinessService = Depends(get_business_service),
@@ -39,6 +43,7 @@ async def get_owner_businesses(
     return business_service.get_by_owner_id(current_user_id)
 
 
+# 5. This endpoint is now PUBLIC
 @router.get("/{business_id}", response_model=BusinessResponse)
 async def get_business(
     business_id: str, business_service: BusinessService = Depends(get_business_service)
@@ -47,6 +52,7 @@ async def get_business(
     return business_service.get_by_id(business_id)
 
 
+# 6. This endpoint remains PROTECTED
 @router.put("/{business_id}", response_model=BusinessResponse)
 async def update_business(
     business_id: str,
@@ -62,9 +68,11 @@ async def update_business(
     )
 
 
+# 7. This endpoint remains PROTECTED
 @router.delete("/{business_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_business(
     business_id: str,
     business_service: BusinessService = Depends(get_business_service),
+    current_user_id: str = Depends(get_current_user_id), # ADDED for security
 ):
-    return business_service.delete(business_id)
+    return business_service.delete(business_id, current_user_id)
