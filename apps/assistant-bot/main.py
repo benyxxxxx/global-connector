@@ -16,12 +16,20 @@ client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=OPENROUTER_API_KEY,
 )
+TELEGRAM_WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://assistant-bot-dev.fly.dev/webhook")
 
 app = FastAPI()
+
+async def set_telegram_webhook():
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/setWebhook"
+    async with httpx.AsyncClient() as client:
+        res = await client.post(url, params={"url": TELEGRAM_WEBHOOK_URL})
+        print("✅ Webhook set:", res.json())
 
 @app.on_event("startup")
 async def startup():
     await set_bot_commands()
+    await set_telegram_webhook()
     print("✅ Bot commands set successfully.")
 
 # In-memory store
