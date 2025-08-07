@@ -2,7 +2,7 @@ import jwt
 
 # IMPORTANT: This must be the exact same secret key used in your n8n workflow
 # and configured in your backend's .env file.
-SECRET_KEY = "4d5f9d5c79e6660e1969f80ff10d6a9b070e6496e393128c3914bbcf3b7e769a"
+SECRET_KEY = "global-connector-dev-secret-key"
 ALGORITHM = "HS256"
 
 def create_access_token(user_id: str) -> str:
