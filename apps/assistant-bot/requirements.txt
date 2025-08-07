@@ -2,5 +2,9 @@ fastapi
 uvicorn
 python-dotenv
 langgraph
+langchain
 langchain-openai
 httpx
+GitPython
+PyGithub
+openai
