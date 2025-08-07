@@ -8,9 +8,9 @@ SET_COMMANDS_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/setMyCommands"
 commands = [
     {"command": "createagent", "description": "Create a new agent"},
     {"command": "listagent", "description": "List all your agents"},
-    {"command": "editagent", "description": "Edit agent (/editagent = <agent name>)"},
-    {"command": "useagent", "description": "Use agent (/useagent = <agent name>)"},
-    {"command": "deleteagent", "description": "Delete agent (/deleteagent = <agent name>)"},
+    {"command": "editagent", "description": "Edit agent"},
+    {"command": "useagent", "description": "Use agent"},
+    {"command": "deleteagent", "description": "Delete agent"},
 ]
 
 async def set_bot_commands():
