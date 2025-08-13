@@ -1,0 +1,10 @@
+services:
+  router:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      # Mount the entire local project directory to the workdir in the container
+      - .:/usr/src/app
+    env_file:
+      - .env
