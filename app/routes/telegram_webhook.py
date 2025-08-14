@@ -29,15 +29,18 @@ async def telegram_webhook(req: Request) -> JSONResponse:
     handled, output = await handle_message(user_id, text, channel="telegram")
 
     if output and chat_id:
-        client = TelegramClient()
-        async def safe_send():
-            try:
-                await client.send_message(chat_id, output, reply_to_message_id=msg.get("message_id"))
-                print(f"Sent message to Telegram chat {chat_id}: {output}")
-            except Exception as e:
-                print(f"--- ERROR SENDING TELEGRAM REPLY ---")
-                print(e)
-                print(f"------------------------------------")
-        asyncio.create_task(safe_send())
+        # client = TelegramClient()
+        # async def safe_send():
+        #     try:
+        #         await client.send_message(chat_id, output, reply_to_message_id=msg.get("message_id"))
+        #         print(f"Sent message to Telegram chat {chat_id}: {output}")
+        #     except Exception as e:
+        #         print(f"--- ERROR SENDING TELEGRAM REPLY ---")
+        #         print(e)
+        #         print(f"------------------------------------")
+        # asyncio.create_task(safe_send())
+        print("\n--- BOT REPLY ---")
+        print(output)
+        print("-----------------\n")
 
     return JSONResponse({"ok": True, "handled": handled})
