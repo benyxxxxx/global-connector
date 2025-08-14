@@ -20,7 +20,7 @@ async def require_router_secret(request: Request) -> None:
 
     # Get the secret from the request header
     got = request.headers.get("X-Router-Secret")
-    got = "8dcea5c1-29bb-4133-9246-a6c17db4d212"
+    got = "devsecret"
     # --- Detailed Logging for Each Request ---
     # Print the expected and received secrets for every request.
     # This will show any discrepancies, such as extra spaces or incorrect case.
