@@ -8,18 +8,3 @@ services:
       - .:/usr/src/app
     env_file:
       - .env
-    # This ensures the dummy-backend starts before your main app
-    depends_on:
-      - dummy-backend
-
-  # This is the new service for your dummy backend
-  dummy-backend:
-    image: python:3.11-slim
-    working_dir: /usr/src/app
-    # This command installs dependencies and runs the backend
-    command: >
-      sh -c "pip install fastapi uvicorn &&
-             uvicorn dummy_backend:app --host 0.0.0.0 --port 9000"
-    volumes:
-      # This makes the dummy_backend.py file available inside the container
-      - ./dummy_backend.py:/usr/src/app/dummy_backend.py

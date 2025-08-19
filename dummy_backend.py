@@ -6,10 +6,10 @@ from typing import Any, Dict
 app = FastAPI()
 
 # This endpoint mimics the GET /api/services/ endpoint
-@app.get("/api/services/")
+@app.get("/api/services")
 async def list_services():
     """Returns a hardcoded list of food services."""
-    print("--> Dummy Backend: Received request for /api/services/")
+    print("--> Dummy Backend: Received request for /api/services")
     await asyncio.sleep(0.1)  # Simulate network delay
     return [
         {"id": 101, "name": "Dummy Pizza", "price": 15.00, "currency": "USD", "flow_key": "food"},
@@ -18,7 +18,7 @@ async def list_services():
     ]
 
 # This endpoint mimics the POST /api/bookings/ endpoint
-@app.post("/api/bookings/")
+@app.post("/api/bookings")
 async def create_booking(request: Request):
     """Receives a booking, prints it, and returns a success message."""
     booking_data: Dict[str, Any] = await request.json()

@@ -1,4 +1,3 @@
-
 import os, httpx
 from typing import Optional
 
@@ -12,7 +11,7 @@ class TelegramClient:
         self.api = API
 
     async def send_message(self, chat_id: int | str, text: str, reply_to_message_id: Optional[int] = None):
-        payload = {"chat_id": chat_id, "text": text, "parse_mode": "MarkdownV2"}
+        payload = {"chat_id": chat_id, "text": text}
         if reply_to_message_id is not None:
             payload["reply_to_message_id"] = reply_to_message_id
         async with httpx.AsyncClient(timeout=10) as cx:

@@ -1,149 +1,101 @@
-
 from __future__ import annotations
 from typing import Tuple, Dict, Any, List
-import os
-from dateutil import parser as dateparser
-try:
-    from app.deps import GLOBAL_PROMO_CODE  # if your project defines it
-except Exception:
-    GLOBAL_PROMO_CODE = os.getenv("GLOBAL_PROMO_CODE", "")
-from app.agents.intent import detect_intent
+import json
+from decimal import Decimal
+from pathlib import Path
+
 from app.clients import backend_api as be
+from app.llm import LLMClient
 
-STATE: Dict[str, Dict[str, Any]] = {}
+# In-memory chat history for simplicity in this MVP
+CHAT_HISTORY: Dict[str, List[Dict]] = {}
 
-def _st(u: str) -> Dict[str, Any]:
-    return STATE.setdefault(u, {"stage": "idle", "ctx": {}})
+# Load the main agent prompt
+try:
+    PROMPT_PATH = Path(__file__).parent.parent / "prompts" / "orchestrator_prompt.txt"
+    AGENT_PROMPT = PROMPT_PATH.read_text(encoding="utf-8")
+except FileNotFoundError:
+    print("ERROR: orchestrator_prompt.txt not found.")
+    AGENT_PROMPT = "You are a helpful assistant."
 
-# entrypoints for DAO-launched services
-async def start_food(user_id: str, defaults=None) -> Tuple[bool, str]:
-    st = _st(user_id); st["stage"] = "food:list"; st["ctx"] = {}
-    services = await be.list_services(user_id=user_id)
-    menu = [s for s in services if (s.get("flow_key") == "food" or "food" in (s.get("tags") or []))]
-    st["ctx"]["menu"] = menu
-    return True, _render_menu(menu)
+# --- Tool Definitions ---
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "browse_services",
+            "description": "Use this tool to show public services the user can book or explore. If they mention a type (e.g. 'massage'), extract a short keyword.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "A search query keyword, e.g., 'pizza', 'tour', 'sim card'",
+                    },
+                },
+                "required": [],
+            },
+        }
+    }
+]
 
-async def start_real_estate(user_id: str, defaults=None) -> Tuple[bool, str]:
-    st = _st(user_id); st["stage"] = "re:start"; st["ctx"] = {}
-    return True, _re_prompt()
+# Map tool names to the functions that execute them
+AVAILABLE_TOOLS = {
+    "browse_services": be.list_services,
+}
 
-def _render_menu(menu: List[Dict[str, Any]]) -> str:
-    if not menu:
-        return "No food items published yet."
-    lines = ["Here are some options:\n"]
-    for i, s in enumerate(menu, 1):
-        name = s.get("name", f"Item {i}")
-        price = s.get("price")
-        currency = s.get("currency") or "USD"
-        price_str = f"${price:.2f} {currency}" if isinstance(price, (int, float)) else "-"
-        lines.append(f"{i}. {name} — {price_str}")
-    lines.append("\nReply with the number to select.")
-    return "\n".join(lines)
+# Helper class to format JSON with Decimal types from the backend
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, Decimal):
+            return str(obj)
+        return super(DecimalEncoder, self).default(obj)
 
 async def handle_message(user_id: str, text: str, channel: str = "http") -> Tuple[bool, str]:
-    st = _st(user_id)
-    stage = st.get("stage", "idle")
-    t = (text or "").strip()
+    """
+    This function now runs the main agent loop.
+    """
+    llm_client = LLMClient()
+    
+    messages = CHAT_HISTORY.setdefault(user_id, [
+        {"role": "system", "content": AGENT_PROMPT}
+    ])
+    messages.append({"role": "user", "content": text})
 
-    # continue flow if already inside
-    if stage.startswith("food:"):
-        return await _food_flow(user_id, t, channel, st)
-    if stage.startswith("re:"):
-        return await _real_estate_flow(user_id, t, channel, st)
+    llm_response = await llm_client.get_agent_response(messages, TOOLS)
+    messages.append(llm_response)
 
-    # detect intent
-    intent = detect_intent(t)
-    if intent == "food":
-        return await start_food(user_id)
-    elif intent == "real_estate":
-        return await start_real_estate(user_id)
-    else:
-        return False, "I can help with food orders or real-estate inquiries. Try: \"I want food\" or \"I want to rent a flat\"."
-
-async def _food_flow(user_id: str, t: str, channel: str, st: Dict[str, Any]) -> Tuple[bool, str]:
-    stage = st["stage"]; ctx = st["ctx"]
-
-    if stage == "food:list":
-        menu = ctx.get("menu") or []
-        if not menu:
-            services = await be.list_services(user_id=user_id)
-            menu = [s for s in services if (s.get("flow_key") == "food" or "food" in (s.get("tags") or []))]
-            ctx["menu"] = menu
-        try:
-            idx = int(t)
-        except:
-            return True, "Please send the number of the item you want."
-        if idx < 1 or idx > len(menu):
-            return True, "Please pick a valid number from the list."
-        item = menu[idx-1]
-        ctx["item"] = item
-        st["stage"] = "food:mode"
-        return True, "Would you like to *Visit Restaurant* or *Get Delivery*?"
-
-    if stage == "food:mode":
-        lt = t.lower()
-        if "visit" in lt:
-            item = ctx.get("item", {})
+    # CORRECTED: Safely check for tool_calls attribute
+    tool_calls = getattr(llm_response, 'tool_calls', None)
+    
+    if tool_calls:
+        tool_call = tool_calls[0]
+        tool_name = tool_call.function.name
+        
+        if tool_name in AVAILABLE_TOOLS:
+            tool_function = AVAILABLE_TOOLS[tool_name]
+            tool_args = json.loads(tool_call.function.arguments)
+            
+            print(f"--- Calling Tool: {tool_name} with args: {tool_args} ---")
+            
             try:
-                await be.create_booking(user_id, {
-                    "service_id": item.get("id"),
-                    "service_name": item.get("name"),
-                    "requested_time": None,
-                    "channel": channel,
-                    "price": item.get("price"),
-                    "currency": item.get("currency") or "USD",
-                    "attributes": {"flow":"food","mode":"visit","source":"router"},
+                tool_result = await tool_function(user_id=user_id, **tool_args)
+                
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "name": tool_name,
+                    "content": json.dumps(tool_result, cls=DecimalEncoder),
                 })
-            except Exception:
-                pass
-            STATE.pop(user_id, None)
-            return True, f"Great — visit confirmed for {item.get('name')}. Enjoy!"
-        if "delivery" in lt:
-            st["stage"] = "food:time"
-            return True, "Delivery — got it. Do you want it *Now* or *Later*?"
-        return True, "Please reply with *Visit Restaurant* or *Get Delivery*."
+                
+                final_response = await llm_client.get_agent_response(messages, TOOLS)
+                messages.append(final_response)
+                return True, final_response.content
+            
+            except Exception as e:
+                # If the tool fails, inform the user and log the error
+                print(f"--- Tool Error: {e} ---")
+                return True, "Sorry, there was an error while trying to fetch that information."
 
-    if stage == "food:time":
-        lt = t.lower()
-        if lt in ("now", "right now", "asap"):
-            requested_time = None
-        else:
-            try:
-                requested_time = dateparser.parse(t, fuzzy=True).isoformat()
-            except:
-                return True, "I couldn't parse that time. Try 'now' or 'today 7pm'."
-
-        item = ctx.get("item", {})
-        try:
-            await be.create_booking(user_id, {
-                "service_id": item.get("id"),
-                "service_name": item.get("name"),
-                "requested_time": requested_time,
-                "channel": channel,
-                "price": item.get("price"),
-                "currency": item.get("currency") or "USD",
-                "attributes": {"flow":"food","mode":"delivery","source":"router"},
-            })
-        except Exception:
-            pass
-        STATE.pop(user_id, None)
-        promo = f" Use promo code **{GLOBAL_PROMO_CODE}**!" if GLOBAL_PROMO_CODE else ""
-        ts = "ASAP" if requested_time is None else requested_time.replace("T"," ")[:16]
-        return True, f"✅ Booking created for *{item.get('name')}* at {ts}.{promo}"
-
-    return True, "Let's start over. Say 'I want food'."
-
-def _re_prompt() -> str:
-    return "Are you looking for a *short-term* stay (days/weeks) or a *long-term* lease (months/years)?"
-
-async def _real_estate_flow(user_id: str, t: str, channel: str, st: Dict[str, Any]) -> Tuple[bool, str]:
-    lt = t.lower()
-    if st["stage"] == "re:start":
-        if "short" in lt:
-            STATE.pop(user_id, None)
-            return True, "Short-term noted. I’ll fetch listings next."
-        if any(k in lt for k in ("long","months","years","rent","lease")):
-            STATE.pop(user_id, None)
-            return True, "Long-term lease noted. I’ll fetch listings next."
-        return True, "Please reply with *short-term* or *long-term*."
-    return True, "Let's start over. Say 'I want to rent a flat'."
+    # If the LLM didn't call a tool, return its message directly
+    return True, getattr(llm_response, 'content', "I'm not sure how to respond to that.")

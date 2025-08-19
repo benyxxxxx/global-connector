@@ -1,14 +1,25 @@
 from typing import Literal
 
-Intent = Literal["food", "real_estate", "unknown"]
+# Define all possible intents based on your categories
+Intent = Literal[
+    "food", "sim_card", "real_estate", "surf", "sport", "tourism", "tech", "unknown"
+]
 
-FOOD_KW = ["food", "pizza", "eat", "restaurant", "hungry", "order", "delivery"]
-RE_KW = ["rent", "buy", "apartment", "flat", "house", "real estate", "lease", "short-term", "short term", "long-term", "long term"]
+# Create keyword lists for each of your 7 categories
+KEYWORDS = {
+    "food": ["food", "restaurant", "delivery", "eat", "pizza", "burger", "salad"],
+    "sim_card": ["sim", "esim", "card", "activate"],
+    "real_estate": ["real estate", "rent", "apartment", "house", "lease", "sales"],
+    "surf": ["surf", "surfing", "lessons", "gear"],
+    "sport": ["sport", "activities", "futsal"],
+    "tourism": ["tour", "tourism", "explore", "guided tour"],
+    "tech": ["tech", "phone", "computer", "repair"],
+}
 
 def detect_intent(text: str) -> Intent:
+    """Detects the user's intent by checking for keywords related to each category."""
     t = (text or "").lower()
-    if any(k in t for k in FOOD_KW):
-        return "food"
-    if any(k in t for k in RE_KW):
-        return "real_estate"
+    for intent, keywords in KEYWORDS.items():
+        if any(keyword in t for keyword in keywords):
+            return intent
     return "unknown"

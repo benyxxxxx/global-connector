@@ -1,41 +1,24 @@
 import os
-from fastapi import Request, HTTPException, status
+from fastapi import Request, HTTPException, status, Security
+from fastapi.security import APIKeyHeader
 
-# --- Enhanced Logging ---
-# Load the secret and print it to the console when the application starts.
-# This helps confirm that the .env file is being loaded correctly.
-ROUTER_SECRET = os.getenv("ROUTER_SECRET", "").strip()
-print("--- FastAPI security.py ---")
-if ROUTER_SECRET:
-    print(f" ROUTER_SECRET loaded successfully: '{ROUTER_SECRET}'")
-else:
-    print(" ROUTER_SECRET is not set. All requests will be allowed.")
-print("--------------------------")
+# Read the single secret key from the .env file
+APP_SECRET_KEY = os.getenv("APP_SECRET_KEY", "").strip()
 
+# Define the security scheme for Swagger UI
+api_key_header = APIKeyHeader(name="X-Router-Secret", auto_error=False)
 
-async def require_router_secret(request: Request) -> None:
-    """If ROUTER_SECRET is set, enforce X-Router-Secret header."""
-    if not ROUTER_SECRET:
+async def require_router_secret(api_key: str = Security(api_key_header)) -> None:
+    """
+    This dependency checks for the X-Router-Secret header and validates it.
+    It is now integrated with Swagger UI.
+    """
+    if not APP_SECRET_KEY:
+        # If no key is set, allow the request
         return
 
-    # Get the secret from the request header
-    got = request.headers.get("X-Router-Secret")
-    got = "devsecret"
-    # --- Detailed Logging for Each Request ---
-    # Print the expected and received secrets for every request.
-    # This will show any discrepancies, such as extra spaces or incorrect case.
-    print(f"\n--- Verifying X-Router-Secret ---")
-    print(f"Expected: '{ROUTER_SECRET}'")
-    print(f"Received: '{got}'")
-
-    # Compare the received secret with the expected one
-    if not got or got.strip() != ROUTER_SECRET:
-        print("❌ Verification FAILED")
-        print("---------------------------------")
+    if not api_key or api_key.strip() != APP_SECRET_KEY:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid router secret. Expected='{ROUTER_SECRET}', Received='{got}'",
+            detail="Invalid or missing X-Router-Secret header.",
         )
-
-    print("✅ Verification SUCCEEDED")
-    print("---------------------------------\n")
