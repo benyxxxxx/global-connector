@@ -58,12 +58,11 @@ async def _post(path: str, json_body: Dict[str, Any], user_id: Optional[str]):
     """Makes an authenticated POST request."""
     async with httpx.AsyncClient(timeout=TIMEOUT) as cx:
         headers = _auth_headers(user_id)
-        json_body['scheduled_at'] = datetime.now().isoformat()
+        # The agent provides scheduled_at, so we remove the automatic addition here.
         r = await cx.post(f"{BASE}{path}", json=json_body, headers=headers)
         r.raise_for_status()
         return r.json()
 
-# --- Public API Functions ---
 
 async def list_services(user_id: Optional[str] = None, query: Optional[str] = None):
     """
@@ -73,5 +72,40 @@ async def list_services(user_id: Optional[str] = None, query: Optional[str] = No
     params = {"q": query} if query else None
     return await _get("/api/services/", params, user_id)
 
-async def create_booking(user_id: str, payload: Dict[str, Any]):
+async def list_categories(user_id: Optional[str] = None):
+    """
+    Fetch service categories. If the endpoint is missing, fall back to deriving categories from services.
+    Returns a dict like {"categories": [{"name": "<category>"}, ...]} for consistency.
+    """
+    try:
+        data = await _get("/api/service-categories/", None, user_id)
+        # normalize format
+        if isinstance(data, dict) and "categories" in data:
+            return data
+        if isinstance(data, list):
+            return {"categories": data}
+    except Exception:
+        pass
+    # Fallback: derive from services
+    try:
+        services = await _get("/api/services/", None, user_id) or []
+        if isinstance(services, dict) and "results" in services:
+            services = services["results"]
+        names = sorted({(svc.get("category") or svc.get("type") or "").strip()
+                        for svc in services if isinstance(svc, dict) and (svc.get("category") or svc.get("type"))})
+        return {"categories": [{"name": n} for n in names if n]}
+    except Exception as e:
+        return {"error": str(e)}
+
+async def create_booking(user_id: str, service_id: str, full_name: str, scheduled_at: str, duration: Optional[int] = None):
+    """Creates a booking by sending data to the backend."""
+    payload = {
+        "service_id": service_id,
+        "full_name": full_name,
+        "scheduled_at": scheduled_at,
+    }
+    if duration:
+        payload["duration"] = duration
+    
     return await _post("/api/bookings/", payload, user_id)
+

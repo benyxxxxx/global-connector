@@ -1,31 +1,12 @@
-# Router v7 (Type-A, final)
+Patch: Intent Engine + Categories Tool (Full v7 Again)
 
-What’s included:
-- `/health` — liveness
-- `/route` — n8n-style shim (returns `{handled, output}`)
-- `/telegram/webhook` — ingest updates and **reply asynchronously**
-- **Service Agent** with two flows:
-  - **Food flow**: list → Visit/Delivery → if Delivery → "Now or later?" → create booking → promo code surfaced
-  - **Real estate** (short-term vs long-term) — branches with placeholders
-- **SQLite persistence** for bookings (`data/app.db`)
-- Minimal Telegram client using `httpx`
-- Smoke test instructions in `smoke_test.txt`
-
-## Run
-```
-pip install -r requirements.txt
-export TELEGRAM_BOT_TOKEN="123456:ABC..."           
-export GLOBAL_PROMO_CODE="WELCOME10"                
-uvicorn app.main:app --reload --port 8080
-```
-
-## Contract
-- **/route** (POST): `{ "message": "...", "user_id": "123", "session": { "session_id": "..." } }`
-  - Response: `{ "handled": true|false, "output": "..." }`
-
-- **/telegram/webhook** (POST): Telegram update JSON
-  - Returns `{"ok": true, "handled": bool}` and sends message back asynchronously.
-
-## Notes
-- Booking data is persisted via SQLite.
-- Conversation state is in-memory per process. For durable state, swap to Redis or a table.
+Env:
+USE_INTENT_ENGINE=true
+INTENT_USE_LLM=true
+INTENT_MODEL=gpt-4o-mini
+INTENT_MIN_CONF=0.55
+LLM_ACCEPT_CONF=0.70
+OPENROUTER_API_KEY=...
+OPENAI_BASE_URL=https://openrouter.ai/api/v1
+SERVICE_API_BASE=https://<your-backend>.fly.dev
+APP_SECRET_KEY=<same-as-backend>

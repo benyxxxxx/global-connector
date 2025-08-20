@@ -31,7 +31,8 @@ async def telegram_webhook(req: Request) -> JSONResponse:
     from_user = msg.get("from") or {}
     user_id = str(from_user.get("id") or chat_id or "anon")
     text = msg.get("text") or ""
-
+    
+    print(f"📥 Incoming message from user {user_id} in chat {chat_id}: {text}")
     handled, output = await handle_message(user_id, text, channel="telegram")
 
     if output and chat_id:
