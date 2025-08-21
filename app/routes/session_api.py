@@ -1,19 +1,13 @@
+# app/routes/session_api.py
 from __future__ import annotations
-import os
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Header, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query
 
 from app.core import session_store as sess
 from app.core import agent_manager as mgr
+from app.security import require_router_secret as _require_secret  # <-- add this
 
 router = APIRouter(prefix="/session", tags=["session"])
-
-def _require_secret(x_router_secret: Optional[str] = Header(None)) -> None:
-    required = os.getenv("ROUTER_SECRET")
-    if not required:
-        return
-    if not x_router_secret or x_router_secret != required:
-        raise HTTPException(status_code=401, detail="Unauthorized")
 
 @router.post("/agent/select", dependencies=[Depends(_require_secret)])
 def select_agent(chat_id: str, agent_id: str):

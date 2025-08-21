@@ -1,7 +1,8 @@
 from __future__ import annotations
-import os
 from typing import Optional, Dict, Any
-from fastapi import APIRouter, HTTPException, Header, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query
+
+from app.security import require_router_secret as _require_secret 
 
 from app.agent_models import (
     Agent, AgentCreateRequest, AgentUpdateRequest,
@@ -10,13 +11,6 @@ from app.agent_models import (
 from app.core import agent_manager as mgr
 
 router = APIRouter(prefix="/router", tags=["agents"])
-
-def _require_secret(x_router_secret: Optional[str] = Header(None)) -> None:
-    required = os.getenv("ROUTER_SECRET")
-    if not required:
-        return
-    if not x_router_secret or x_router_secret != required:
-        raise HTTPException(status_code=401, detail="Unauthorized")
 
 @router.get("/agents", response_model=list[Agent], dependencies=[Depends(_require_secret)])
 def list_agents(include_archived: int = Query(0, ge=0, le=1)):
