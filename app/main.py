@@ -4,8 +4,14 @@ from app.routes.health import router as health_router
 from app.routes.route_endpoint import router as route_router
 from app.routes.intent_endpoint import router as intent_router
 from app.routes.telegram_webhook import router as telegram_router
+from app.routes.agents_api import router as agents_router
+from app.routes.catalog_api import router as catalog_router
+from app.routes.session_api import router as session_router
+from app import models                 
+from app import models_agents  
 import os, httpx, asyncio
 
+Base.metadata.create_all(bind=engine)
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 print("TELEGRAM_BOT_TOKEN:: ", TELEGRAM_BOT_TOKEN)
@@ -34,4 +40,6 @@ app.include_router(health_router)
 app.include_router(route_router)
 app.include_router(intent_router)
 app.include_router(telegram_router)
-
+app.include_router(agents_router)
+app.include_router(catalog_router)
+app.include_router(session_router)

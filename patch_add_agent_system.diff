@@ -1,0 +1,554 @@
+
+diff --git a/app/core/__init__.py b/app/core/__init__.py
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/app/core/__init__.py
+@@ -0,0 +1 @@
++# package marker
+diff --git a/app/core/agent_manager.py b/app/core/agent_manager.py
+new file mode 100644
+index 0000000..2222222
+--- /dev/null
++++ b/app/core/agent_manager.py
+@@ -0,0 +1,228 @@
++from __future__ import annotations
++
++import os, json, uuid, hashlib
++from pathlib import Path
++from typing import List, Optional, Dict, Any, Iterable
++from datetime import datetime, timezone
++from pydantic import ValidationError
++
++from app.models.agent import (
++    Agent, AgentCreateRequest, AgentUpdateRequest,
++    TeachRequest, MemoryRecord
++)
++
++_DATA_DIR = Path(os.getenv("ROUTER_DATA_DIR", "/mnt/data/router_data")).resolve()
++_AGENTS_PATH = _DATA_DIR / "agents.json"
++_MEM_DIR = _DATA_DIR / "memories"
++
++def _utcnow() -> datetime:
++    return datetime.now(timezone.utc)
++
++def _load_agents() -> List[Dict[str, Any]]:
++    if not _AGENTS_PATH.exists():
++        return []
++    try:
++        with _AGENTS_PATH.open("r", encoding="utf-8") as f:
++            return json.load(f)
++    except Exception:
++        return []
++
++def _save_agents(rows: List[Dict[str, Any]]) -> None:
++    _DATA_DIR.mkdir(parents=True, exist_ok=True)
++    tmp = _AGENTS_PATH.with_suffix(".tmp")
++    with tmp.open("w", encoding="utf-8") as f:
++        json.dump(rows, f, ensure_ascii=False, indent=2, default=str)
++    tmp.replace(_AGENTS_PATH)
++
++def _validate_tools(tools: Optional[List[str]]) -> List[str]:
++    if not tools:
++        return []
++    available = set()
++    try:
++        from app.tools import registry as tools_registry  # type: ignore
++        reg = getattr(tools_registry, "REGISTRY", None)
++        if reg is None:
++            get_reg = getattr(tools_registry, "get_registry", None)
++            reg = get_reg() if callable(get_reg) else {}
++        if isinstance(reg, dict):
++            available = set(reg.keys())
++        elif isinstance(reg, Iterable):
++            available = set([getattr(x, "key", None) for x in reg if getattr(x, "key", None)])
++    except Exception:
++        available = set()
++    if available:
++        return [t for t in tools if t in available]
++    return list(tools)
++
++def list_agents(include_archived: bool = False) -> List[Agent]:
++    rows = _load_agents()
++    out: List[Agent] = []
++    for r in rows:
++        if not include_archived and r.get("status") == "archived":
++            continue
++        try:
++            out.append(Agent(**r))
++        except ValidationError:
++            continue
++    return out
++
++def _find_index(rows: List[Dict[str, Any]], agent_id: str) -> int:
++    for i, r in enumerate(rows):
++        if r.get("id") == agent_id:
++            return i
++    return -1
++
++def get_agent(agent_id: str) -> Optional[Agent]:
++    rows = _load_agents()
++    for r in rows:
++        if r.get("id") == agent_id:
++            try:
++                return Agent(**r)
++            except ValidationError:
++                return None
++    return None
++
++def create_agent(req: AgentCreateRequest) -> Agent:
++    rows = _load_agents()
++    for r in rows:
++        if r.get("name") == req.name and r.get("status") != "archived":
++            raise ValueError("Agent with this name already exists")
++    now = _utcnow()
++    agent = Agent(
++        id=f"agent_{uuid.uuid4().hex[:8]}",
++        name=req.name,
++        description=req.description,
++        emoji=req.emoji,
++        visibility=req.visibility,
++        teachable=req.teachable,
++        tools_allowed=_validate_tools(req.tools_allowed),
++        status="active",
++        created_at=now,
++        updated_at=now,
++    )
++    rows.append(agent.model_dump(mode="json"))
++    _save_agents(rows)
++    return agent
++
++def update_agent(agent_id: str, req: AgentUpdateRequest) -> Optional[Agent]:
++    rows = _load_agents()
++    idx = _find_index(rows, agent_id)
++    if idx == -1:
++        return None
++    row = rows[idx]
++    for field in ["name", "description", "emoji", "visibility", "teachable", "status"]:
++        val = getattr(req, field, None)
++        if val is not None:
++            row[field] = val
++    if req.tools_allowed is not None:
++        row["tools_allowed"] = _validate_tools(req.tools_allowed)
++    row["updated_at"] = _utcnow().isoformat()
++    _save_agents(rows)
++    try:
++        return Agent(**row)
++    except ValidationError:
++        return None
++
++def archive_agent(agent_id: str) -> bool:
++    rows = _load_agents()
++    idx = _find_index(rows, agent_id)
++    if idx == -1:
++        return False
++    rows[idx]["status"] = "archived"
++    rows[idx]["updated_at"] = _utcnow().isoformat()
++    _save_agents(rows)
++    return True
++
++def _mem_path(agent_id: str, scope: str, user_id: Optional[str]):
++    if scope == "per_user":
++        if not user_id:
++            raise ValueError("user_id required for per_user scope")
++        d = _MEM_DIR / agent_id / "per_user"
++        d.mkdir(parents=True, exist_ok=True)
++        return d / f"{user_id}.jsonl"
++    else:
++        d = _MEM_DIR / agent_id
++        d.mkdir(parents=True, exist_ok=True)
++        return d / "shared.jsonl"
++
++def teach(agent_id: str, req: TeachRequest) -> MemoryRecord:
++    ag = get_agent(agent_id)
++    if not ag:
++        raise ValueError("Agent not found")
++    rec = MemoryRecord(
++        memory_id=hashlib.sha1((req.content + (req.user_id or '')).encode('utf-8')).hexdigest()[:12],
++        scope=req.scope,
++        user_id=req.user_id,
++        tags=req.tags or [],
++        content=req.content,
++        created_at=_utcnow()
++    )
++    path = _mem_path(agent_id, req.scope, req.user_id)
++    line = json.dumps(rec.model_dump(mode="json"), ensure_ascii=False)
++    with open(path, "a", encoding="utf-8") as f:
++        f.write(line + "\n")
++    return rec
++
++def read_brain(agent_id: str, scope: Optional[str] = None, user_id: Optional[str] = None,
++               tag: Optional[str] = None, limit: int = 100):
++    ag = get_agent(agent_id)
++    if not ag:
++        return []
++    records = []
++    paths = []
++    if scope in (None, "shared"):
++        paths.append(_mem_path(agent_id, "shared", None))
++    if scope in (None, "per_user"):
++        per_dir = _MEM_DIR / agent_id / "per_user"
++        if user_id:
++            paths.append(_mem_path(agent_id, "per_user", user_id))
++        elif per_dir.exists():
++            paths.extend(per_dir.glob("*.jsonl"))
++    for p in paths:
++        if not p.exists():
++            continue
++        try:
++            with open(p, "r", encoding="utf-8") as f:
++                for line in f:
++                    try:
++                        obj = json.loads(line)
++                        if tag and tag not in (obj.get("tags") or []):
++                            continue
++                        records.append(MemoryRecord(**obj))
++                        if len(records) >= limit:
++                            return records
++                    except Exception:
++                        continue
++        except Exception:
++            continue
++    return records
++
++def exec_tool(agent_id: str, tool_key: str, params: Dict[str, Any], context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
++    ag = get_agent(agent_id)
++    if not ag:
++        return {"ok": False, "error": "agent_not_found"}
++    if tool_key not in (ag.tools_allowed or []):
++        return {"ok": False, "error": "tool_not_allowed"}
++    try:
++        from app.tools import runner as tools_runner  # type: ignore
++        if hasattr(tools_runner, "exec_tool"):
++            return tools_runner.exec_tool(agent_id=agent_id, key=tool_key, params=params, ctx=context or {})
++        if hasattr(tools_runner, "run"):
++            out = tools_runner.run(tool_key, params, context or {})
++            return {"ok": True, "output": out}
++        return {"ok": False, "error": "runner_missing_exec_tool"}
++    except Exception as e:
++        return {"ok": False, "error": f"runner_error: {e}"}
++
++def log_message(agent_id: str, content: str, user_id: Optional[str] = None, tag: str = "msg") -> MemoryRecord:
++    return teach(agent_id, TeachRequest(content=content, scope="shared", user_id=user_id, tags=[tag]))
+diff --git a/app/core/session_store.py b/app/core/session_store.py
+new file mode 100644
+index 0000000..3333333
+--- /dev/null
++++ b/app/core/session_store.py
+@@ -0,0 +1,49 @@
++from __future__ import annotations
++import os, json, threading
++from pathlib import Path
++from typing import Optional
++
++_DATA_DIR = Path(os.getenv("ROUTER_DATA_DIR", "/mnt/data/router_data")).resolve()
++_SESS_PATH = _DATA_DIR / "chat_sessions.json"
++_LOCK = threading.Lock()
++
++def _load() -> dict:
++    if not _SESS_PATH.exists():
++        return {}
++    try:
++        with _SESS_PATH.open("r", encoding="utf-8") as f:
++            return json.load(f)
++    except Exception:
++        return {}
++
++def _save(d: dict) -> None:
++    _DATA_DIR.mkdir(parents=True, exist_ok=True)
++    tmp = _SESS_PATH.with_suffix(".tmp")
++    with tmp.open("w", encoding="utf-8") as f:
++        json.dump(d, f, ensure_ascii=False, indent=2)
++    tmp.replace(_SESS_PATH)
++
++def set_active(chat_id: str, agent_id: str) -> None:
++    with _LOCK:
++        d = _load()
++        d[chat_id] = agent_id
++        _save(d)
++
++def get_active(chat_id: str) -> Optional[str]:
++    with _LOCK:
++        d = _load()
++        return d.get(chat_id)
++
++def clear_active(chat_id: str) -> None:
++    with _LOCK:
++        d = _load()
++        if chat_id in d:
++            del d[chat_id]
++            _save(d)
+diff --git a/app/models/agent.py b/app/models/agent.py
+new file mode 100644
+index 0000000..4444444
+--- /dev/null
++++ b/app/models/agent.py
+@@ -0,0 +1,62 @@
++from __future__ import annotations
++from typing import List, Optional, Literal, Dict, Any
++from datetime import datetime
++from pydantic import BaseModel, Field
++
++Visibility = Literal["public", "unlisted", "private"]
++AgentStatus = Literal["active", "disabled", "archived"]
++Scope = Literal["per_user", "shared"]
++
++class AgentBase(BaseModel):
++    name: str = Field(..., min_length=2, max_length=64)
++    description: Optional[str] = None
++    emoji: Optional[str] = None
++    visibility: Visibility = "private"
++    teachable: bool = True
++    tools_allowed: List[str] = Field(default_factory=list)
++
++class AgentCreateRequest(AgentBase):
++    pass
++
++class AgentUpdateRequest(BaseModel):
++    name: Optional[str] = Field(None, min_length=2, max_length=64)
++    description: Optional[str] = None
++    emoji: Optional[str] = None
++    visibility: Optional[Visibility] = None
++    teachable: Optional[bool] = None
++    tools_allowed: Optional[List[str]] = None
++    status: Optional[AgentStatus] = None
++
++class Agent(AgentBase):
++    id: str
++    status: AgentStatus = "active"
++    created_at: datetime
++    updated_at: datetime
++
++class TeachRequest(BaseModel):
++    content: str = Field(..., min_length=1, max_length=8192)
++    scope: Scope = "shared"
++    user_id: Optional[str] = None
++    tags: Optional[List[str]] = None
++
++class MemoryRecord(BaseModel):
++    memory_id: str
++    scope: Scope
++    user_id: Optional[str] = None
++    tags: List[str] = Field(default_factory=list)
++    content: str
++    created_at: datetime
++
++class ToolExecRequest(BaseModel):
++    tool: str
++    params: Dict[str, Any] = Field(default_factory=dict)
++    context: Optional[Dict[str, Any]] = None
++
++class ToolExecResult(BaseModel):
++    ok: bool
++    output: Optional[Any] = None
++    meta: Optional[Dict[str, Any]] = None
++    error: Optional[str] = None
+diff --git a/app/routes/agents_api.py b/app/routes/agents_api.py
+new file mode 100644
+index 0000000..5555555
+--- /dev/null
++++ b/app/routes/agents_api.py
+@@ -0,0 +1,92 @@
++from __future__ import annotations
++import os
++from typing import Optional, Dict, Any
++from fastapi import APIRouter, HTTPException, Header, Depends, Query
++
++from app.models.agent import (
++    Agent, AgentCreateRequest, AgentUpdateRequest,
++    TeachRequest, ToolExecRequest, MemoryRecord
++)
++from app.core import agent_manager as mgr
++
++router = APIRouter(prefix="/router", tags=["agents"])
++
++def _require_secret(x_router_secret: Optional[str] = Header(None)) -> None:
++    required = os.getenv("ROUTER_SECRET")
++    if not required:
++        return
++    if not x_router_secret or x_router_secret != required:
++        raise HTTPException(status_code=401, detail="Unauthorized")
++
++@router.get("/agents", response_model=list[Agent], dependencies=[Depends(_require_secret)])
++def list_agents(include_archived: int = Query(0, ge=0, le=1)):
++    return mgr.list_agents(include_archived=bool(include_archived))
++
++@router.post("/agents", response_model=Agent, dependencies=[Depends(_require_secret)], status_code=201)
++def create_agent(req: AgentCreateRequest):
++    try:
++        return mgr.create_agent(req)
++    except ValueError as e:
++        raise HTTPException(status_code=400, detail=str(e))
++
++@router.get("/agents/{agent_id}", response_model=Agent, dependencies=[Depends(_require_secret)])
++def get_agent(agent_id: str):
++    ag = mgr.get_agent(agent_id)
++    if not ag:
++        raise HTTPException(status_code=404, detail="Not found")
++    return ag
++
++@router.patch("/agents/{agent_id}", response_model=Agent, dependencies=[Depends(_require_secret)])
++def update_agent(agent_id: str, req: AgentUpdateRequest):
++    ag = mgr.update_agent(agent_id, req)
++    if not ag:
++        raise HTTPException(status_code=404, detail="Not found")
++    return ag
++
++@router.delete("/agents/{agent_id}", dependencies=[Depends(_require_secret)])
++def delete_agent(agent_id: str):
++    ok = mgr.archive_agent(agent_id)
++    if not ok:
++        raise HTTPException(status_code=404, detail="Not found")
++    return {"ok": True, "archived": True}
++
++# Brains / Teach
++@router.post("/agents/{agent_id}/teach", response_model=MemoryRecord, dependencies=[Depends(_require_secret)])
++def teach(agent_id: str, req: TeachRequest):
++    try:
++        return mgr.teach(agent_id, req)
++    except ValueError as e:
++        raise HTTPException(status_code=400, detail=str(e))
++
++@router.get("/agents/{agent_id}/brain", response_model=list[MemoryRecord], dependencies=[Depends(_require_secret)])
++def brain(agent_id: str, scope: Optional[str] = None, user_id: Optional[str] = None, tag: Optional[str] = None, limit: int = 100):
++    return mgr.read_brain(agent_id, scope=scope, user_id=user_id, tag=tag, limit=limit)
++
++# Tools registry view + assign + exec
++@router.get("/tools", dependencies=[Depends(_require_secret)])
++def list_tools() -> Dict[str, Any]:
++    try:
++        from app.tools import registry as tools_registry  # type: ignore
++    except Exception:
++        return {"ok": True, "tools": {}}
++    reg = getattr(tools_registry, "REGISTRY", None)
++    if reg is None:
++        get_reg = getattr(tools_registry, "get_registry", None)
++        reg = get_reg() if callable(get_reg) else {}
++    out: Dict[str, Any] = {}
++    if isinstance(reg, dict):
++        for k, v in reg.items():
++            title = getattr(v, "title", k)
++            desc = getattr(v, "description", "")
++            out[k] = {"title": title, "description": desc}
++    else:
++        try:
++            for v in reg:
++                k = getattr(v, "key", None)
++                if not k:
++                    continue
++                out[k] = {"title": getattr(v, "title", k), "description": getattr(v, "description", "")}
++        except Exception:
++            out = {}
++    return {"ok": True, "tools": out}
++
++@router.put("/agents/{agent_id}/tools", dependencies=[Depends(_require_secret)])
++def set_agent_tools(agent_id: str, tools: list[str]):
++    ag = mgr.update_agent(agent_id, AgentUpdateRequest(tools_allowed=tools))
++    if not ag:
++        raise HTTPException(status_code=404, detail="Not found")
++    return {"ok": True, "agent": ag}
++
++@router.post("/agents/{agent_id}/tools/exec", dependencies=[Depends(_require_secret)])
++def tools_exec(agent_id: str, req: ToolExecRequest):
++    return mgr.exec_tool(agent_id, req.tool, req.params, req.context or {})
+diff --git a/app/routes/catalog_api.py b/app/routes/catalog_api.py
+new file mode 100644
+index 0000000..6666666
+--- /dev/null
++++ b/app/routes/catalog_api.py
+@@ -0,0 +1,33 @@
++from __future__ import annotations
++from typing import Optional, List
++from fastapi import APIRouter, Query
++
++from app.core import agent_manager as mgr
++from app.models.agent import Agent
++
++router = APIRouter(prefix="/catalog", tags=["catalog"])
++
++@router.get("/agents")
++def public_agents(q: Optional[str] = Query(None), lang: Optional[str] = Query(None), limit: int = 50):
++    agents: List[Agent] = mgr.list_agents(include_archived=False)
++    out = []
++    for a in agents:
++        if a.visibility not in ("public", "unlisted"):
++            continue
++        if q and q.lower() not in a.name.lower():
++            continue
++        out.append({
++            "id": a.id,
++            "name": a.name,
++            "emoji": a.emoji,
++            "blurb": a.description,
++            "languages": [],
++            "visibility": a.visibility,
++        })
++        if len(out) >= max(1, min(limit, 200)):
++            break
++    return out
+diff --git a/app/routes/session_api.py b/app/routes/session_api.py
+new file mode 100644
+index 0000000..7777777
+--- /dev/null
++++ b/app/routes/session_api.py
+@@ -0,0 +1,36 @@
++from __future__ import annotations
++import os
++from typing import Optional
++from fastapi import APIRouter, HTTPException, Header, Depends, Query
++
++from app.core import session_store as sess
++from app.core import agent_manager as mgr
++
++router = APIRouter(prefix="/session", tags=["session"])
++
++def _require_secret(x_router_secret: Optional[str] = Header(None)) -> None:
++    required = os.getenv("ROUTER_SECRET")
++    if not required:
++        return
++    if not x_router_secret or x_router_secret != required:
++        raise HTTPException(status_code=401, detail="Unauthorized")
++
++@router.post("/agent/select", dependencies=[Depends(_require_secret)])
++def select_agent(chat_id: str, agent_id: str):
++    if not mgr.get_agent(agent_id):
++        raise HTTPException(status_code=404, detail="Agent not found")
++    sess.set_active(chat_id, agent_id)
++    return {"ok": True, "chat_id": chat_id, "active_agent_id": agent_id}
++
++@router.get("/agent", dependencies=[Depends(_require_secret)])
++def get_selected_agent(chat_id: str = Query(...)):
++    return {"chat_id": chat_id, "active_agent_id": sess.get_active(chat_id)}
+diff --git a/app/main.py b/app/main.py
+index 1234567..8888888 100644
+--- a/app/main.py
++++ b/app/main.py
+@@ -1,12 +1,18 @@
+ from fastapi import FastAPI
+ from app.db import Base, engine
+ from app.routes.health import router as health_router
+ from app.routes.route_endpoint import router as route_router
+ from app.routes.intent_endpoint import router as intent_router
+ from app.routes.telegram_webhook import router as telegram_router
++from app.routes.agents_api import router as agents_router
++from app.routes.catalog_api import router as catalog_router
++from app.routes.session_api import router as session_router
+ import os, httpx, asyncio
+
+
+ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+ print("TELEGRAM_BOT_TOKEN:: ", TELEGRAM_BOT_TOKEN)
+ TELEGRAM_WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://router-v7-typea-final.fly.dev/telegram/webhook")
+ print("TELEGRAM_WEBHOOK_URL:: ", TELEGRAM_WEBHOOK_URL)
+
+ app = FastAPI(title="Router v7 Type-A")
+@@ -23,6 +29,9 @@
+ Base.metadata.create_all(bind=engine)
+
+ app.include_router(health_router)
+ app.include_router(route_router)
+ app.include_router(intent_router)
+ app.include_router(telegram_router)
++app.include_router(agents_router)
++app.include_router(catalog_router)
++app.include_router(session_router)

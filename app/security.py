@@ -1,24 +1,41 @@
+# app/security.py
 import os
-from fastapi import Request, HTTPException, status, Security
-from fastapi.security import APIKeyHeader
+from typing import Optional
+from fastapi import Header, HTTPException
 
-# Read the single secret key from the .env file
-APP_SECRET_KEY = os.getenv("APP_SECRET_KEY", "").strip()
-
-# Define the security scheme for Swagger UI
-api_key_header = APIKeyHeader(name="X-Router-Secret", auto_error=False)
-
-async def require_router_secret(api_key: str = Security(api_key_header)) -> None:
+def require_router_secret(
+    x_router_secret: Optional[str] = Header(None, convert_underscores=False),
+    authorization: Optional[str] = Header(None),
+    x_api_key: Optional[str] = Header(None, convert_underscores=False),
+) -> None:
     """
-    This dependency checks for the X-Router-Secret header and validates it.
-    It is now integrated with Swagger UI.
+    Accepts any of:
+      - X-Router-Secret: <token>
+      - X-API-Key: <token>
+      - Authorization: Bearer <token>
+
+    Tokens allowed:
+      - APP_SECRET_KEY (existing admin key)
+      - APP_LLM_SECRET  (optional, for your LLM client)
     """
-    if not APP_SECRET_KEY:
-        # If no key is set, allow the request
+    admin = os.getenv("APP_SECRET_KEY")
+    llm = os.getenv("APP_LLM_SECRET")  # optional
+
+    allowed_tokens = [t for t in [admin, llm] if t]
+
+    # development fallback: if no secret is configured, don't block
+    if not allowed_tokens:
         return
 
-    if not api_key or api_key.strip() != APP_SECRET_KEY:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or missing X-Router-Secret header.",
-        )
+    presented = []
+    if x_router_secret:
+        presented.append(x_router_secret)
+    if x_api_key:
+        presented.append(x_api_key)
+    if authorization and authorization.lower().startswith("bearer "):
+        presented.append(authorization.split(" ", 1)[1].strip())
+
+    if any(tok in allowed_tokens for tok in presented):
+        return
+
+    raise HTTPException(status_code=401, detail="Unauthorized")
