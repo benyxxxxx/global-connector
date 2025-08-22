@@ -1,7 +1,9 @@
+# app/routes/telegram_webhook.py
+
 from __future__ import annotations
 import os
 from typing import Any, Dict, Optional
-import httpx  # Import httpx to catch its specific exceptions
+import httpx
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -19,27 +21,35 @@ DEFAULT_AGENT_ID = os.getenv("DEFAULT_AGENT_ID")
 
 @router.post("/telegram/webhook")
 async def telegram_webhook(req: Request) -> JSONResponse:
-    # Initialize variables to ensure they exist in the exception scope
     chat_id = None
     output = ""
     
-    # This broad try block will now catch all errors, including network connection errors.
     try:
         if WEBHOOK_SECRET:
             if req.headers.get("X-Telegram-Bot-Api-Secret-Token") != WEBHOOK_SECRET:
                 return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
 
         update: Dict[str, Any] = await req.json()
-        msg: Optional[Dict[str, Any]] = update.get("message") or update.get("edited_message")
+        
+        if "callback_query" in update:
+            callback_query = update["callback_query"]
+            chat_id = callback_query["message"]["chat"]["id"]
+            user_id = callback_query["from"]["id"]
+            data = callback_query["data"]
+            text = data
+            msg = callback_query["message"]
+        
+        else:
+            msg: Optional[Dict[str, Any]] = update.get("message") or update.get("edited_message")
 
-        if not msg or not msg.get("text"):
-            return JSONResponse({"ok": True})
+            if not msg or not msg.get("text"):
+                return JSONResponse({"ok": True})
 
-        chat = msg.get("chat", {})
-        chat_id = str(chat.get("id"))
-        from_user = msg.get("from", {})
-        user_id = str(from_user.get("id") or chat_id or "anon")
-        text = (msg.get("text") or "").strip()
+            chat = msg.get("chat", {})
+            chat_id = str(chat.get("id"))
+            from_user = msg.get("from", {})
+            user_id = str(from_user.get("id") or chat_id or "anon")
+            text = (msg.get("text") or "").strip()
 
         print(f"📥 Incoming message from user {user_id} in chat {chat_id}: {text}")
 
@@ -47,7 +57,6 @@ async def telegram_webhook(req: Request) -> JSONResponse:
         session = sess.get_session(chat_id)
         state = session.get("state")
 
-        # --- Command Handling ---
         if text.startswith("/"):
             sess.clear_session_state(chat_id)
 
@@ -63,10 +72,12 @@ async def telegram_webhook(req: Request) -> JSONResponse:
                     await client.send_message(chat_id, "There are no public agents available at the moment.", reply_to_message_id=msg.get("message_id"))
                     return JSONResponse({"ok": True})
 
-                lines = [f"• **{a.name}**\n  ID: `{a.id}`" for a in public[:20]]
-                message = "Available agents:\n\n" + "\n\n".join(lines)
-                message += "\n\nTo switch to an agent, use the command:\n`/use <agent_id_or_name>`"
-                await client.send_message(chat_id, message, reply_to_message_id=msg.get("message_id"))
+                keyboard = []
+                for agent in public:
+                    keyboard.append([{"text": f"{agent.name}", "callback_data": f"/use {agent.id}"}])
+
+                reply_markup = {"inline_keyboard": keyboard}
+                await client.send_message(chat_id, "Please choose a bot to interact with:", reply_markup=reply_markup)
                 return JSONResponse({"ok": True})
 
             if text.startswith("/agent") or text.startswith("/whoami"):
@@ -91,7 +102,6 @@ async def telegram_webhook(req: Request) -> JSONResponse:
                 await client.send_message(chat_id, "Cleared agent for this chat.", reply_to_message_id=msg.get("message_id"))
                 return JSONResponse({"ok": True})
 
-        # --- Stateful Conversation Flows ---
         if state == "create_name":
             session["form_data"] = {"name": text}
             session["state"] = "create_description"
@@ -119,7 +129,6 @@ async def telegram_webhook(req: Request) -> JSONResponse:
             sess.clear_session_state(chat_id)
             return JSONResponse({"ok": True})
 
-        # --- Default Message Handling ---
         active_agent_id = sess.get_active(chat_id) or DEFAULT_AGENT_ID
         if not active_agent_id:
             await client.send_message(chat_id, "Hello! How can I assist you today? If you're looking for services to book, just let me know!")
@@ -137,9 +146,7 @@ async def telegram_webhook(req: Request) -> JSONResponse:
 
         return JSONResponse({"ok": True, "handled": bool(handled)})
 
-    # --- This block now catches ALL errors, including connection errors ---
     except httpx.ConnectError as e:
-        # This ensures the connection error is always printed to your terminal
         print(f"--- CAUGHT CONNECTION ERROR ---\n{e}\n-----------------\n")
         print("\n--- Outgoing Telegram Message ---")
         print(f"Chat ID: {chat_id}")
@@ -147,23 +154,19 @@ async def telegram_webhook(req: Request) -> JSONResponse:
         return JSONResponse({"ok": True, "error_handled": "ConnectError"})
         
     except Exception as e:
-        # This ensures any other unexpected error is always printed to your terminal
         print(f"--- CAUGHT UNEXPECTED ERROR ---\n{e}\n-----------------\n")
         
-        # Attempt to extract chat_id for a user-facing error message, if possible
         try:
             update = await req.json()
             msg = update.get("message", {})
             chat_id_inner = msg.get("chat", {}).get("id")
             if chat_id_inner:
-                # Use a new client instance to be safe
                 error_client = TelegramClient()
                 await error_client.send_message(chat_id_inner, "Sorry, I encountered an error and couldn't process your request.")
         except Exception as notification_error:
             print(f"--- FAILED TO NOTIFY USER OF ERROR ---\n{notification_error}\n-----------------")
             print("\n--- Outgoing Telegram Message ---")
-            print(f"Chat ID: {chat_id}") # Use chat_id from the outer scope
-            print(f"Message: {output}") # Use output from the outer scope
+            print(f"Chat ID: {chat_id}")
+            print(f"Message: {output}")
             
-        # Return a 200 OK to Telegramto prevent it from resending the message
         return JSONResponse({"ok": True, "error_handled": True})
