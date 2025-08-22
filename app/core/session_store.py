@@ -35,11 +35,12 @@ def update_session(chat_id: str, data: Dict[str, Any]) -> None:
         d = _load()
         if chat_id not in d:
             d[chat_id] = {}
+        # Merge the new data into the existing session
         d[chat_id].update(data)
         _save(d)
 
 def clear_session_state(chat_id: str) -> None:
-    """Clears the state, keeping the active agent."""
+    """Clears the conversational state, but keeps the active agent."""
     with _LOCK:
         d = _load()
         if chat_id in d:
@@ -50,18 +51,18 @@ def clear_session_state(chat_id: str) -> None:
                 d[chat_id]["active_agent"] = active_agent
             _save(d)
 
-def set_active_agent(chat_id: str, agent_id: str) -> None:
+def set_active(chat_id: str, agent_id: str) -> None:
     """Sets the active agent for a chat."""
     update_session(chat_id, {"active_agent": agent_id})
 
-def get_active_agent(chat_id: str) -> Optional[str]:
+def get_active(chat_id: str) -> Optional[str]:
     """Gets the active agent for a chat."""
     return get_session(chat_id).get("active_agent")
 
-def clear_active_agent(chat_id: str) -> None:
+def clear_active(chat_id: str) -> None:
     """Clears the active agent for a chat."""
     with _LOCK:
         d = _load()
         if chat_id in d and "active_agent" in d[chat_id]:
             del d[chat_id]["active_agent"]
-        _save(d)
+            _save(d)

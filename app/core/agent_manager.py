@@ -138,7 +138,12 @@ def teach(agent_id: str, req: TeachRequest) -> MemoryRecord:
         ag = db.get(AgentDB, agent_id)
         if not ag:
             raise ValueError("Agent not found")
-        memory_id = hashlib.sha1((req.content + (req.user_id or '')).encode('utf-8')).hexdigest()[:12]
+        
+        # This line is changed to include a timestamp, ensuring a unique ID
+        now = _utcnow()
+        hash_input = f"{req.content}-{req.user_id or ''}-{now.isoformat()}"
+        memory_id = hashlib.sha1(hash_input.encode('utf-8')).hexdigest()[:12]
+
         mem = AgentMemoryDB(
             memory_id=memory_id,
             agent_id=agent_id,
@@ -146,7 +151,7 @@ def teach(agent_id: str, req: TeachRequest) -> MemoryRecord:
             user_id=req.user_id,
             tags=req.tags or [],
             content=req.content,
-            created_at=_utcnow(),
+            created_at=now,
         )
         db.add(mem)
         db.commit()

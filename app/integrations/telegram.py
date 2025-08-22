@@ -11,10 +11,28 @@ class TelegramClient:
         self.api = API
 
     async def send_message(self, chat_id: int | str, text: str, reply_to_message_id: Optional[int] = None):
+        """
+        Attempts to send a message to Telegram and prints the outcome to the terminal.
+        """
+        # Always print the message first to see it in your terminal
+        print("--- Outgoing Telegram Message ---")
+        print(f"Chat ID: {chat_id}")
+        print(f"Message: {text}")
+        print("---------------------------------")
+
         payload = {"chat_id": chat_id, "text": text}
         if reply_to_message_id is not None:
             payload["reply_to_message_id"] = reply_to_message_id
-        async with httpx.AsyncClient(timeout=10) as cx:
-            r = await cx.post(f"{self.api}/sendMessage", json=payload)
-            r.raise_for_status()
+            
+        try:
+            async with httpx.AsyncClient(timeout=10) as cx:
+                r = await cx.post(f"{self.api}/sendMessage", json=payload)
+                r.raise_for_status() # Check if Telegram returned an error
+            print("✅ Message successfully sent to Telegram.")
             return r.json()
+        except httpx.ConnectError as e:
+            # This catches the network error and prevents the crash
+            print(f"❌ CONNECTION ERROR: The message was not sent. Error: {e}")
+        except Exception as e:
+            print(f"❌ An unexpected error occurred while sending message: {e}")
+
