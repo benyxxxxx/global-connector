@@ -69,12 +69,18 @@ async def telegram_webhook(req: Request) -> JSONResponse:
                 items = agents_mgr.list_agents(include_archived=False)
                 public = [a for a in items if a.visibility in ("public", "unlisted")]
                 if not public:
-                    await client.send_message(chat_id, "There are no public agents available at the moment.", reply_to_message_id=msg.get("message_id"))
+                    await client.send_message(chat_id, "There are no public agents available at the moment.")
                     return JSONResponse({"ok": True})
 
+                # --- MODIFIED FOR TWO COLUMNS ---
                 keyboard = []
-                for agent in public:
-                    keyboard.append([{"text": f"{agent.name}", "callback_data": f"/use {agent.id}"}])
+                for i in range(0, len(public), 2):
+                    row = []
+                    row.append({"text": f"{public[i].name}", "callback_data": f"/use {public[i].id}"})
+                    if i + 1 < len(public):
+                        row.append({"text": f"{public[i+1].name}", "callback_data": f"/use {public[i+1].id}"})
+                    keyboard.append(row)
+                # --- END MODIFICATION ---
 
                 reply_markup = {"inline_keyboard": keyboard}
                 await client.send_message(chat_id, "Please choose a bot to interact with:", reply_markup=reply_markup)
