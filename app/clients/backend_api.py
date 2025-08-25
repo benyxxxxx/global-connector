@@ -1,12 +1,13 @@
+import base64
+import hashlib
+import hmac
+import json
 import os
 import time
-import json
-import httpx
-import base64
-import hmac
-import hashlib
-from typing import Any, Dict, Optional
 from datetime import datetime
+from typing import Any, Dict, Optional
+
+import httpx
 
 # Read configuration from environment variables
 BASE = os.getenv("SERVICE_API_BASE", "").rstrip("/")

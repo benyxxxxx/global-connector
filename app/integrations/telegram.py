@@ -1,4 +1,4 @@
-
+# app/integrations/telegram.py
 import os, httpx
 from typing import Optional, Dict, Any
 
@@ -11,21 +11,27 @@ class TelegramClient:
             raise RuntimeError("TELEGRAM_BOT_TOKEN not set")
         self.api = API
 
-    async def send_message(self, chat_id: int | str, text: str, reply_to_message_id: Optional[int] = None, reply_markup: Optional[Dict[str, Any]] = None):
+    async def send_message(
+        self,
+        chat_id: int | str,
+        text: str,
+        reply_to_message_id: Optional[int] = None,
+        reply_markup: Optional[Dict[str, Any]] = None,
+    ):
         """
         Attempts to send a message to Telegram and prints the outcome to the terminal.
         """
         print("--- Outgoing Telegram Message ---")
         print(f"Chat ID: {chat_id}")
         print(f"Message: {text}")
-        print("---------------------------------")
+        print("--------------------------------")
 
         payload = {"chat_id": chat_id, "text": text}
         if reply_to_message_id is not None:
             payload["reply_to_message_id"] = reply_to_message_id
         if reply_markup:
             payload["reply_markup"] = reply_markup
-            
+
         try:
             async with httpx.AsyncClient(timeout=10) as cx:
                 r = await cx.post(f"{self.api}/sendMessage", json=payload)
