@@ -1,5 +1,7 @@
 import os
 from typing import Optional
+import re
+import unicodedata
 
 # ⬇️ import your existing bits
 # from app.orchestrator.runtime import run_orchestrator  # <- your function that talks to LLM + tools
@@ -7,6 +9,18 @@ from typing import Optional
 # from app.models import Agent, Session, AgentMemory  # rename to your actual models
 
 DEFAULT_AGENT_ID = os.getenv("DEFAULT_AGENT_ID", "agent_service")
+def _normalize_text(t: str) -> str:
+    """
+    Normalize message variants so 'AddService', 'add_service', 'add-service'
+    all become 'add service'; also NFKC unicode normalize and lowercase.
+    """
+    if not t:
+        return ""
+    t = unicodedata.normalize("NFKC", t)
+    t = re.sub(r'(?<=[a-z])(?=[A-Z])', ' ', t)   # split CamelCase (AddService -> Add Service)
+    t = re.sub(r'[_\-]+', ' ', t)                # underscores/dashes -> space
+    t = re.sub(r'\s+', ' ', t).strip().lower()   # squeeze spaces + lowercase
+    return t
 
 # --- Agent repo (DB-backed) ---
 def list_agents(db) -> list[dict]:
@@ -56,8 +70,112 @@ def add_memory(db, agent_id: str, chat_id: str, role: str, text: str):
 
 # --- Runtime wrapper (uniform response) ---
 def handle_agent_message(chat_id: str, user_id: str, text: str, agent_id: Optional[str] = None) -> dict:
+    """Entry called by /router/agent/message.
+
+    Behavior:
+      - If `text` is a JSON action (add/update/delete), return an ACK (no DB changes here).
+      - Else if text expresses "add service" intent (incl. variants), start guided add flow.
+      - Otherwise, delegate to Service Agent LLM orchestration (async-safe).
+
+    Returns: {"handled": bool, "reply": str, "meta": {...}}
+    """
+    import json
+
     agent_id = agent_id or DEFAULT_AGENT_ID
-    # r = run_orchestrator(chat_id=chat_id, user_id=user_id, text=text, agent_id=agent_id)
-    # add_memory(db, agent_id, chat_id, "user", text); add_memory(db, agent_id, chat_id, "assistant", r.reply)
-    # return {"handled": True, "reply": r.reply, "meta": r.meta}
-    return {"handled": True, "reply": f"[stub] {text}", "meta": {"agent_id": agent_id}}
+
+    # Try to parse JSON commands like: {"action":"add","target":"...","data":{...}}
+    def _try_parse_json(s: str):
+        try:
+            return json.loads(s)
+        except Exception:
+            return None
+
+    t = (text or "").strip()
+
+    # -------------------------
+    # 1) JSON ACTION — TOP PRIORITY (unchanged behavior)
+    # -------------------------
+    j = _try_parse_json(t)
+    if isinstance(j, dict) and j.get("action") in {"add", "update", "delete"}:
+        # Wire these to your DB/service layer later as needed.
+        return {
+            "handled": True,
+            "reply": f"[ack:{j.get('action')}] {j.get('target') or ''}".strip(),
+            "meta": {"agent_id": agent_id, "mode": "json-action", "input": j},
+        }
+
+    # -------------------------
+    # 2) ADD-SERVICE INTENT — prioritized over generic "services"
+    # -------------------------
+    t_norm = _normalize_text(t)
+
+    # Accept variants: "add service", "add services", "create service", "new service",
+    # glued/underscore/dash: "AddService", "add_services", "add-service", "addservices"
+    # Short commands: "/add" (optionally "/new" — remove if you don't want it)
+    add_re = re.compile(r"\b(add|create|new)\s*(service|services)\b", re.IGNORECASE)
+    add_glue_re = re.compile(r"\baddservice(s)?\b", re.IGNORECASE)
+
+    # If you want to EXCLUDE '/new', remove it from the set below.
+    if add_re.search(t_norm) or add_glue_re.search(t_norm) or t_norm in {"/add", "/service_add", "/new"}:
+        reply = (
+            "Let's add a new service!\n\n"
+            "**Send JSON** like:\n"
+            "```json\n"
+            "{\n"
+            "  \"action\": \"add\",\n"
+            "  \"name\": \"EcoBike Delivery\",\n"
+            "  \"category\": \"Food\",\n"
+            "  \"price\": \"20000 VND\",\n"
+            "  \"description\": \"Fast delivery for expats\"\n"
+            "}\n"
+            "```\n"
+            "Or just tell me the *name* to begin the guided flow."
+        )
+        return {
+            "handled": True,
+            "reply": reply,
+            "meta": {"agent_id": agent_id, "intent": "add_service"}
+        }
+
+    # -------------------------
+    # 3) FALLBACK — LLM service agent (unchanged)
+    # -------------------------
+    try:
+        import asyncio
+        from app.agents import service_agent as SA
+
+        loop = asyncio.get_event_loop()
+        handled, answer = loop.run_until_complete(
+            SA.handle_message(user_id=user_id, text=t, channel="http")
+        )
+        return {
+            "handled": bool(handled),
+            "reply": answer or "",
+            "meta": {"agent_id": agent_id, "mode": "llm"},
+        }
+
+    except RuntimeError:
+        # No running loop – create one
+        import asyncio
+        from app.agents import service_agent as SA
+
+        loop = asyncio.new_event_loop()
+        try:
+            handled, answer = loop.run_until_complete(
+                SA.handle_message(user_id=user_id, text=t, channel="http")
+            )
+        finally:
+            loop.close()
+        return {
+            "handled": bool(handled),
+            "reply": answer or "",
+            "meta": {"agent_id": agent_id, "mode": "llm"},
+        }
+
+    except Exception as e:
+        # Safe stub so HTTP never explodes
+        return {
+            "handled": True,
+            "reply": f"[stub] {t}",
+            "meta": {"agent_id": agent_id, "error": str(e)},
+        }
