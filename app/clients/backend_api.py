@@ -14,6 +14,16 @@ BASE = os.getenv("SERVICE_API_BASE", "").rstrip("/")
 SECRET_KEY = os.getenv("APP_SECRET_KEY", "")
 TIMEOUT = float(os.getenv("SERVICE_API_TIMEOUT", "12"))
 
+CATEGORY_NAME_TO_ID = {
+    "food": 1,
+    "sim card": 2,
+    "real estate": 3,
+    "surf": 4,
+    "sport": 5,
+    "tourism": 6,
+    "tech": 7,
+}
+
 def _b64url(data: bytes) -> str:
     """Encodes bytes to base64url format."""
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
@@ -59,7 +69,6 @@ async def _post(path: str, json_body: Dict[str, Any], user_id: Optional[str]):
     """Makes an authenticated POST request."""
     async with httpx.AsyncClient(timeout=TIMEOUT) as cx:
         headers = _auth_headers(user_id)
-        # The agent provides scheduled_at, so we remove the automatic addition here.
         r = await cx.post(f"{BASE}{path}", json=json_body, headers=headers)
         r.raise_for_status()
         return r.json()
@@ -80,14 +89,12 @@ async def list_categories(user_id: Optional[str] = None):
     """
     try:
         data = await _get("/api/service-categories/", None, user_id)
-        # normalize format
         if isinstance(data, dict) and "categories" in data:
             return data
         if isinstance(data, list):
             return {"categories": data}
     except Exception:
         pass
-    # Fallback: derive from services
     try:
         services = await _get("/api/services/", None, user_id) or []
         if isinstance(services, dict) and "results" in services:
@@ -110,3 +117,46 @@ async def create_booking(user_id: str, service_id: str, full_name: str, schedule
     
     return await _post("/api/bookings/", payload, user_id)
 
+async def create_service(
+    user_id: str,
+    business_name: str,
+    name: str,
+    description: str,
+    category_name: str, 
+    pricing_model: str,
+    currency: str,
+    base_price: float,
+    location: Optional[str] = None,
+    place: Optional[bool] = None,
+    delivery: Optional[bool] = None,
+    requires_booking: Optional[bool] = None,
+    time_unit: Optional[str] = None,
+    min_duration: Optional[int] = None,
+    max_duration: Optional[int] = None,
+    attributes: Optional[Dict[str, Any]] = None,
+):
+    """Creates a new service by sending data to the backend."""
+    
+    category_id = CATEGORY_NAME_TO_ID.get(category_name.lower())
+    if category_id is None:
+        return {"error": f"Category '{category_name}' not found."}
+    payload = {
+        "business_name": business_name,
+        "name": name,
+        "description": description,
+        "category_id": category_id,
+        "pricing_model": pricing_model,
+        "currency": currency,
+        "base_price": base_price,
+        "location": location,
+        "place": place,
+        "delivery": delivery,
+        "requires_booking": requires_booking,
+        "time_unit": time_unit,
+        "min_duration": min_duration,
+        "max_duration": max_duration,
+        "attributes": attributes or {},
+    }
+    # Filter out None values to send a clean payload
+    payload = {k: v for k, v in payload.items() if v is not None}
+    return await _post("/api/services/", payload, user_id)
