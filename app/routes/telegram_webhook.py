@@ -13,7 +13,11 @@ from app.integrations.telegram import TelegramClient
 from app.core import session_store as sess
 from app.core import agent_manager as agents_mgr
 from app.agent_models import AgentCreateRequest
+import re
+from app.services import router_service as ROUTER
 
+from app.agents import info_only_agent as INFO
+from app.clients.catalog_api import CatalogAPI
 router = APIRouter()
 
 WEBHOOK_SECRET   = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
@@ -36,6 +40,11 @@ async def telegram_webhook(req: Request) -> JSONResponse:
             chat_id = callback_query["message"]["chat"]["id"]
             user_id = callback_query["from"]["id"]
             data = callback_query["data"]
+            info_cb = await INFO.handle_callback(str(chat_id), data, CatalogAPI(), client)
+            if info_cb and info_cb.get("handled"):
+                if info_cb.get("output"):
+                    await client.send_message(chat_id, info_cb["output"])
+                return JSONResponse({"ok": True})
             text = data
             msg = callback_query["message"]
         
@@ -56,10 +65,30 @@ async def telegram_webhook(req: Request) -> JSONResponse:
         client = TelegramClient()
         session = sess.get_session(chat_id)
         state = session.get("state")
+    
+        if state and state.startswith("svc_create_"):
+            resp = await ROUTER.handle_agent_message(chat_id, user_id, text)
 
+            return await client.send_message(chat_id, resp["reply"])
+        
         if text.startswith("/"):
-            sess.clear_session_state(chat_id)
-
+            session = sess.get_session(chat_id)
+            state = session.get("state")
+            
+            if (
+                text in {"/menu", "/start"} or
+                re.search(r"\b(menu|categories|what do you have|what services do you have)\b", text, re.I) or
+                re.search(r"\b(food|restaurant|restaurants|dining|transport|taxi|bike|bicycle|scooter)\b", text, re.I)
+            ):
+                info_resp = await INFO.handle_message(chat_id, text, CatalogAPI(), client)
+                if info_resp and info_resp.get("output"):
+                    await client.send_message(chat_id, info_resp["output"], reply_to_message_id=msg.get("message_id"))
+                return JSONResponse({"ok": True})
+            
+            if text in {"/add_service", "/add", "/service_add", "/new"} or re.search(r"\b(add|create|new)\s*service", text, re.I):
+                resp = await ROUTER.handle_agent_message(chat_id, user_id, text)
+                return await client.send_message(chat_id, resp["reply"])
+            
             if text.startswith("/create"):
                 sess.update_session(chat_id, {"state": "create_name", "form_data": {}})
                 await client.send_message(chat_id, "🆕 **Create a New Agent**\n\nEnter a name for your agent:")
@@ -108,6 +137,10 @@ async def telegram_webhook(req: Request) -> JSONResponse:
                 await client.send_message(chat_id, "Cleared agent for this chat.", reply_to_message_id=msg.get("message_id"))
                 return JSONResponse({"ok": True})
 
+        if re.search(r"\b(add|create|new)\s*service", text, re.I):
+            resp = await ROUTER.handle_agent_message(chat_id, user_id, text)
+            return await client.send_message(chat_id, resp["reply"])
+        
         if state == "create_name":
             session["form_data"] = {"name": text}
             session["state"] = "create_description"

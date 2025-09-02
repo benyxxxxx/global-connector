@@ -63,32 +63,23 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "get_service",
-            "description": "Fetch a single service by ID to determine which booking fields are required (e.g., duration for time-based, address for delivery, variant choice, etc.).",
+            "name": "create_service",
+            "description": "Creates a new service for a business.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "service_id": {"type": "string"},
+                    "business_name": {"type": "string", "description": "The name of the business offering the service."},
+                    "name": {"type": "string", "description": "The name of the new service."},
+                    "description": {"type": "string", "description": "A description of the service."},
+                    # --- Start Correction ---
+                    "category_name": {"type": "string", "description": "The name of the service category (e.g., 'food', 'tech')."},
+                    # --- End Correction ---
+                    "pricing_model": {"type": "string", "enum": ["flat", "time_based"], "description": "The pricing model for the service."},
+                    "currency": {"type": "string", "description": "The currency for the price (e.g., USD)."},
+                    "base_price": {"type": "number", "description": "The base price of the service."}
                 },
-                "required": ["service_id"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "create_booking",
-            "description": "Create a booking once all required info is gathered.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "service_id": {"type": "string"},
-                    "full_name": {"type": "string"},
-                    "scheduled_at": {"type": "string", "format": "date-time"},
-                    "duration": {"type": "integer"},
-                    "attributes": { "type": "object", "additionalProperties": True },
-                },
-                "required": ["service_id", "full_name", "scheduled_at"],
+                # --- Also update the 'required' list ---
+                "required": ["business_name", "name", "description", "category_name", "pricing_model", "currency", "base_price"],
             },
         },
     },
@@ -98,7 +89,7 @@ AVAILABLE_TOOLS = {
     "browse_services": be.list_services,
     "list_categories": be.list_categories,
     "create_booking": be.create_booking,
-    "create_booking": be.create_booking,
+    "create_service": be.create_service,
 }
 
 
@@ -124,18 +115,13 @@ def _extract_tool_call_components(tc: Any) -> Tuple[Optional[str], Optional[str]
     Returns (id, name, args_json_str) for various SDK shapes.
     """
     try:
-        # SDK object
         if hasattr(tc, "function"):
             fn = tc.function
             return _get_tool_call_id(tc), getattr(fn, "name", None), (getattr(fn, "arguments", "") or "{}")
-
-        # Pydantic-like
         if hasattr(tc, "model_dump"):
             d = tc.model_dump() or {}
             fn = d.get("function") or {}
             return d.get("id", ""), fn.get("name"), (fn.get("arguments") or "{}")
-
-        # Dict
         if isinstance(tc, dict):
             fn = tc.get("function") or {}
             return tc.get("id", ""), fn.get("name"), (fn.get("arguments") or "{}")
@@ -176,6 +162,14 @@ async def _maybe_decide_intent(text: str, lang_hint: Optional[str]) -> Optional[
 
 
 async def _run_tool(fn: Any, user_id: str, payload: Dict[str, Any]) -> Any:
+    # Ensure category_id is an integer if it exists in the payload
+    if "category_id" in payload and payload["category_id"] is not None:
+        try:
+            payload["category_id"] = int(payload["category_id"])
+        except (ValueError, TypeError):
+            # Handle cases where the category_id is not a valid integer
+            # You might want to return an informative error message to the user
+            return "Error: Invalid category ID provided. It must be a number."
     try:
         if inspect.iscoroutinefunction(fn):
             try:
@@ -201,31 +195,17 @@ async def handle_message(user_id: str, text: str, channel: str = "http") -> Tupl
     System prompt -> (optional intent hint) -> user -> LLM -> tools -> final LLM.
     """
     messages = CHAT_HISTORY.setdefault(user_id, [])
-
-    # Ensure system prompt at the start of the conversation
     if not messages or messages[0].get("role") != "system":
         messages.insert(0, {"role": "system", "content": SYS_PROMPT})
-
-    # Intent hint
     if USE_INTENT_ENGINE:
         hint = await _maybe_decide_intent(text, None)
         if hint:
             messages.append({"role": "system", "content": f"[intent_hint]{_safe_json_dumps(hint)}"})
-
-    # User turn
     messages.append({"role": "user", "content": text})
-
     llm = LLMClient()
-
-    # 1st pass — may contain tool calls
     reply = await llm.get_agent_response(messages, TOOLS)
-
-    # Extract tool calls from reply (supports different SDK shapes)
     tool_calls = getattr(reply, "tool_calls", None) or (getattr(reply, "additional_kwargs", {}) or {}).get("tool_calls")
-
     if tool_calls:
-        # IMPORTANT: append the assistant message that CONTAINS tool_calls
-        # so that 'tool' messages have a valid preceding assistant turn.
         assistant_tc_list: List[Dict[str, Any]] = []
         for tc in tool_calls:
             tc_id, tc_name, tc_args_raw = _extract_tool_call_components(tc)
@@ -238,7 +218,6 @@ async def handle_message(user_id: str, text: str, channel: str = "http") -> Tupl
                     "function": {"name": tc_name, "arguments": tc_args_raw or "{}"},
                 }
             )
-
         messages.append(
             {
                 "role": "assistant",
@@ -246,14 +225,11 @@ async def handle_message(user_id: str, text: str, channel: str = "http") -> Tupl
                 "tool_calls": assistant_tc_list,
             }
         )
-
-        # Execute tools and append 'tool' messages right after (no other roles in between)
         for tc in tool_calls:
             tc_id, tc_name, _tc_args_raw = _extract_tool_call_components(tc)
             name, payload = _extract_tool_call(tc)
             if not name:
                 continue
-
             fn = AVAILABLE_TOOLS.get(name)
             if not fn:
                 messages.append(
@@ -264,7 +240,6 @@ async def handle_message(user_id: str, text: str, channel: str = "http") -> Tupl
                     }
                 )
                 continue
-
             result = await _run_tool(fn, user_id=user_id, payload=payload or {})
             messages.append(
                 {
@@ -273,11 +248,7 @@ async def handle_message(user_id: str, text: str, channel: str = "http") -> Tupl
                     "content": _safe_json_dumps(result),
                 }
             )
-
-        # 2nd pass — produce final user-facing answer
         reply = await llm.get_agent_response(messages, TOOLS)
-
     final_text = getattr(reply, "content", None) or str(reply)
     messages.append({"role": "assistant", "content": final_text})
-
     return True, final_text

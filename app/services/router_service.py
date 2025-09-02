@@ -2,6 +2,15 @@ import os
 from typing import Optional
 import re
 import unicodedata
+import json
+import asyncio
+import time
+from app.core import session_store as sess
+
+import inspect
+
+from app.agents import service_agent as SA
+from app.clients import backend_api as be
 
 # ⬇️ import your existing bits
 # from app.orchestrator.runtime import run_orchestrator  # <- your function that talks to LLM + tools
@@ -69,113 +78,116 @@ def add_memory(db, agent_id: str, chat_id: str, role: str, text: str):
     ...
 
 # --- Runtime wrapper (uniform response) ---
-def handle_agent_message(chat_id: str, user_id: str, text: str, agent_id: Optional[str] = None) -> dict:
-    """Entry called by /router/agent/message.
-
-    Behavior:
-      - If `text` is a JSON action (add/update/delete), return an ACK (no DB changes here).
-      - Else if text expresses "add service" intent (incl. variants), start guided add flow.
-      - Otherwise, delegate to Service Agent LLM orchestration (async-safe).
-
-    Returns: {"handled": bool, "reply": str, "meta": {...}}
-    """
-    import json
-
+async def handle_agent_message(chat_id: str, user_id: str, text: str, agent_id: Optional[str] = None) -> dict:
     agent_id = agent_id or DEFAULT_AGENT_ID
+    t_raw = (text or "").strip()          # <-- define raw text
+    t_norm = _normalize_text(t_raw)       # normalized (underscores -> spaces, lowercase)
 
-    # Try to parse JSON commands like: {"action":"add","target":"...","data":{...}}
-    def _try_parse_json(s: str):
+    # --- session (same store as /create agent flow)
+    session = sess.get_session(chat_id)
+    state = session.get("state")
+    form = session.get("svc_form", {})
+
+    # ========== Cancel ==========
+    if state and state.startswith("svc_create_") and t_norm in {"cancel", "/cancel"}:
+        sess.clear_session_state(chat_id)
+        return {
+            "handled": True,
+            "reply": "Cancelled the add-service flow. Type `/add_service` to start again.",
+            "meta": {"agent_id": agent_id, "intent": "cancel_add_service"},
+        }
+
+    # ========== Continue Wizard ==========
+    if state == "svc_create_business":
+        form = {"business_name": t_raw}
+        sess.update_session(chat_id, {"state": "svc_create_name", "svc_form": form})
+        return {"handled": True, "reply": "What’s the **Service Name**?", "meta": {"agent_id": agent_id, "intent": "add_service", "mode": "guided"}}
+
+    if state == "svc_create_name":
+        form["name"] = t_raw
+        sess.update_session(chat_id, {"state": "svc_create_description", "svc_form": form})
+        return {"handled": True, "reply": "Add a short **Description**.", "meta": {"agent_id": agent_id, "intent": "add_service", "mode": "guided"}}
+
+    if state == "svc_create_description":
+        form["description"] = t_raw
+        sess.update_session(chat_id, {"state": "svc_create_category", "svc_form": form})
+        return {"handled": True, "reply": "Which **Category**? (e.g., food, tech)", "meta": {"agent_id": agent_id, "intent": "add_service", "mode": "guided"}}
+
+    if state == "svc_create_category":
+        form["category_name"] = t_raw
+        sess.update_session(chat_id, {"state": "svc_create_pricing_model", "svc_form": form})
+        return {"handled": True, "reply": "Choose **Pricing Model**: `flat` or `time-based`.", "meta": {"agent_id": agent_id, "intent": "add_service", "mode": "guided"}}
+
+    if state == "svc_create_pricing_model":
+        pm = t_norm
+        if pm not in {"flat", "time based", "time-based"}:
+            return {"handled": True, "reply": "Please enter `flat` or `time-based`.", "meta": {"agent_id": agent_id, "intent": "add_service", "mode": "guided"}}
+        # store to match backend schema (underscore)
+        form["pricing_model"] = "time_based" if "time" in pm else "flat"
+        sess.update_session(chat_id, {"state": "svc_create_currency", "svc_form": form})
+        return {"handled": True, "reply": "Currency code? (e.g., **USD**, **NPR**)", "meta": {"agent_id": agent_id, "intent": "add_service", "mode": "guided"}}
+
+    if state == "svc_create_currency":
+        form["currency"] = t_raw.strip().upper()
+        sess.update_session(chat_id, {"state": "svc_create_price", "svc_form": form})
+        return {"handled": True, "reply": "What’s the **Base Price**? (number)", "meta": {"agent_id": agent_id, "intent": "add_service", "mode": "guided"}}
+
+    if state == "svc_create_price":
+        price = t_raw.replace(",", "").strip()
         try:
-            return json.loads(s)
+            float(price)
         except Exception:
-            return None
+            return {"handled": True, "reply": "Please enter a valid number for Base Price.", "meta": {"agent_id": agent_id, "intent": "add_service", "mode": "guided"}}
+        form["base_price"] = price
 
-    t = (text or "").strip()
-
-    # -------------------------
-    # 1) JSON ACTION — TOP PRIORITY (unchanged behavior)
-    # -------------------------
-    j = _try_parse_json(t)
-    if isinstance(j, dict) and j.get("action") in {"add", "update", "delete"}:
-        # Wire these to your DB/service layer later as needed.
-        return {
-            "handled": True,
-            "reply": f"[ack:{j.get('action')}] {j.get('target') or ''}".strip(),
-            "meta": {"agent_id": agent_id, "mode": "json-action", "input": j},
-        }
-
-    # -------------------------
-    # 2) ADD-SERVICE INTENT — prioritized over generic "services"
-    # -------------------------
-    t_norm = _normalize_text(t)
-
-    # Accept variants: "add service", "add services", "create service", "new service",
-    # glued/underscore/dash: "AddService", "add_services", "add-service", "addservices"
-    # Short commands: "/add" (optionally "/new" — remove if you don't want it)
-    add_re = re.compile(r"\b(add|create|new)\s*(service|services)\b", re.IGNORECASE)
-    add_glue_re = re.compile(r"\baddservice(s)?\b", re.IGNORECASE)
-
-    # If you want to EXCLUDE '/new', remove it from the set below.
-    if add_re.search(t_norm) or add_glue_re.search(t_norm) or t_norm in {"/add", "/service_add", "/new"}:
-        reply = (
-            "Let's add a new service!\n\n"
-            "**Send JSON** like:\n"
-            "```json\n"
-            "{\n"
-            "  \"action\": \"add\",\n"
-            "  \"name\": \"EcoBike Delivery\",\n"
-            "  \"category\": \"Food\",\n"
-            "  \"price\": \"20000 VND\",\n"
-            "  \"description\": \"Fast delivery for expats\"\n"
-            "}\n"
-            "```\n"
-            "Or just tell me the *name* to begin the guided flow."
-        )
-        return {
-            "handled": True,
-            "reply": reply,
-            "meta": {"agent_id": agent_id, "intent": "add_service"}
-        }
-
-    # -------------------------
-    # 3) FALLBACK — LLM service agent (unchanged)
-    # -------------------------
-    try:
-        import asyncio
-        from app.agents import service_agent as SA
-
-        loop = asyncio.get_event_loop()
-        handled, answer = loop.run_until_complete(
-            SA.handle_message(user_id=user_id, text=t, channel="http")
-        )
-        return {
-            "handled": bool(handled),
-            "reply": answer or "",
-            "meta": {"agent_id": agent_id, "mode": "llm"},
-        }
-
-    except RuntimeError:
-        # No running loop – create one
-        import asyncio
-        from app.agents import service_agent as SA
-
-        loop = asyncio.new_event_loop()
+        # Submit directly to backend API (same one the orchestrator uses)
         try:
-            handled, answer = loop.run_until_complete(
-                SA.handle_message(user_id=user_id, text=t, channel="http")
-            )
-        finally:
-            loop.close()
-        return {
-            "handled": bool(handled),
-            "reply": answer or "",
-            "meta": {"agent_id": agent_id, "mode": "llm"},
-        }
+            result = be.create_service(user_id=user_id, **form)   # may be sync or async
+            if inspect.isawaitable(result):
+                result = await result
+        except Exception as e:
+            sess.clear_session_state(chat_id)
+            return {"handled": True,
+                    "reply": f"Something went wrong creating the service: {e}",
+                    "meta": {"agent_id": agent_id, "intent": "add_service", "error": str(e)}}
+            
 
-    except Exception as e:
-        # Safe stub so HTTP never explodes
+        # Clear state and confirm
+        sess.clear_session_state(chat_id)
+        human = result if isinstance(result, str) else "Service created."
         return {
             "handled": True,
-            "reply": f"[stub] {t}",
-            "meta": {"agent_id": agent_id, "error": str(e)},
+            "reply": human,
+            "meta": {"agent_id": agent_id, "intent": "add_service", "mode": "submit"},
         }
+
+
+    # ========== Start Wizard (NO '/create' here) ==========
+    # Check RAW slash commands first (normalization would break underscores)
+    if t_raw in {"/add_service", "/add", "/service_add", "/new"}:
+        sess.update_session(chat_id, {"state": "svc_create_business", "svc_form": {}})
+        return {
+            "handled": True,
+            "reply": "Let’s add a new service. What’s the **Business Name**?",
+            "meta": {"agent_id": agent_id, "intent": "add_service", "mode": "guided"},
+        }
+
+    # Then check normalized phrases / glued variants
+    add_re = re.compile(r"\b(add|create|new)\s*(service|services)\b", re.IGNORECASE)
+    add_glue_re = re.compile(r"\b(add|create)(service|services)\b", re.IGNORECASE)
+    if add_re.search(t_norm) or add_glue_re.search(t_norm):
+        sess.update_session(chat_id, {"state": "svc_create_business", "svc_form": {}})
+        return {"handled": True, "reply": "Let’s add a new service. What’s the **Business Name**?", "meta": {"agent_id": agent_id, "intent": "add_service", "mode": "guided"}}
+
+    # ========== Fallback (browse/search or LLM) ==========
+    loop = asyncio.new_event_loop()
+    try:
+        handled, answer = loop.run_until_complete(SA.handle_message(user_id=user_id, text=t_raw, channel="http"))
+    except Exception as e:
+        try: loop.close()
+        except Exception: pass
+        return {"handled": True, "reply": f"[router_service error] {str(e)}", "meta": {"agent_id": agent_id, "error": str(e)}}
+    try: loop.close()
+    except Exception: pass
+
+    return {"handled": bool(handled), "reply": answer or "", "meta": {"agent_id": agent_id, "mode": "llm"}}
