@@ -34,19 +34,26 @@ async def telegram_webhook(req: Request) -> JSONResponse:
                 return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
 
         update: Dict[str, Any] = await req.json()
+        client = TelegramClient()
         
         if "callback_query" in update:
             callback_query = update["callback_query"]
-            chat_id = callback_query["message"]["chat"]["id"]
-            user_id = callback_query["from"]["id"]
+            chat_id = str(callback_query["message"]["chat"]["id"])
+            user_id = str(callback_query["from"]["id"])
             data = callback_query["data"]
+            msg = callback_query["message"]
+            
+            try:
+                await client.answer_callback_query(callback_query["id"])
+            except Exception:
+                pass
+            
             info_cb = await INFO.handle_callback(str(chat_id), data, CatalogAPI(), client)
             if info_cb and info_cb.get("handled"):
                 if info_cb.get("output"):
                     await client.send_message(chat_id, info_cb["output"])
                 return JSONResponse({"ok": True})
             text = data
-            msg = callback_query["message"]
         
         else:
             msg: Optional[Dict[str, Any]] = update.get("message") or update.get("edited_message")
@@ -62,7 +69,6 @@ async def telegram_webhook(req: Request) -> JSONResponse:
 
         print(f"📥 Incoming message from user {user_id} in chat {chat_id}: {text}")
 
-        client = TelegramClient()
         session = sess.get_session(chat_id)
         state = session.get("state")
     
@@ -184,6 +190,17 @@ async def telegram_webhook(req: Request) -> JSONResponse:
                 print(f"✅ Sent message to Telegram chat {chat_id}: {output}")
 
         return JSONResponse({"ok": True, "handled": bool(handled)})
+
+        # if output:
+        #     # // CHANGES HERE: sanitize any non-string output (avoid raw object reprs)
+        #     if not isinstance(output, str):
+        #         try:
+        #             output = getattr(output, "content", None) or output.get("content") or str(output)
+        #         except Exception:
+        #             output = str(output)
+        #         success = await client.send_message(chat_id, output, reply_to_message_id=msg.get("message_id"))
+        #         if success:
+        #             print(f"✅ Sent message to Telegram chat {chat_id}: {output}")
 
     except httpx.ConnectError as e:
         print(f"--- CAUGHT CONNECTION ERROR ---\n{e}\n-----------------\n")

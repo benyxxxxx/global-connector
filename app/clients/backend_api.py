@@ -1,15 +1,20 @@
+# app/clients/backend_api.py
+# =========================================
+# FULL FILE — improved category + listing logic
+# =========================================
+from __future__ import annotations
+
 import base64
 import hashlib
 import hmac
 import json
 import os
 import time
-from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
-# Read configuration from environment variables
+# ---- Config ----
 BASE = os.getenv("SERVICE_API_BASE", "").rstrip("/")
 SECRET_KEY = os.getenv("APP_SECRET_KEY", "")
 TIMEOUT = float(os.getenv("SERVICE_API_TIMEOUT", "12"))
@@ -24,41 +29,30 @@ CATEGORY_NAME_TO_ID = {
     "tech": 7,
 }
 
+# ---- JWT helpers ----
 def _b64url(data: bytes) -> str:
-    """Encodes bytes to base64url format."""
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
 
 def _sign_hs256(payload: Dict[str, Any]) -> str:
-    """Signs a payload and returns a JWT."""
     if not SECRET_KEY:
         raise RuntimeError("APP_SECRET_KEY is not set in .env file")
-        
     header = {"alg": "HS256", "typ": "JWT"}
     header_b64 = _b64url(json.dumps(header, separators=(",", ":")).encode())
     payload_b64 = _b64url(json.dumps(payload, separators=(",", ":")).encode())
-    
     signing_input = f"{header_b64}.{payload_b64}".encode()
     sig = hmac.new(SECRET_KEY.encode(), signing_input, hashlib.sha256).digest()
     sig_b64 = _b64url(sig)
-    
     return f"{header_b64}.{payload_b64}.{sig_b64}"
 
 def _auth_headers(user_id: Optional[str]) -> Dict[str, str]:
-    """Generates the authorization headers for a request."""
     if not BASE:
         raise RuntimeError("SERVICE_API_BASE is not set in .env file")
-    
     now = int(time.time())
-    token = _sign_hs256({
-        "user_id": user_id or "router-service",
-        "iat": now,
-        "exp": now + 3600
-    })
-    
+    token = _sign_hs256({"user_id": user_id or "router-service", "iat": now, "exp": now + 3600})
     return {"Authorization": f"Bearer {token}", "Accept": "application/json"}
 
+# ---- HTTP helpers (async) ----
 async def _get(path: str, params: Optional[Dict[str, Any]], user_id: Optional[str]):
-    """Makes an authenticated GET request."""
     async with httpx.AsyncClient(timeout=TIMEOUT) as cx:
         headers = _auth_headers(user_id)
         r = await cx.get(f"{BASE}{path}", params=params, headers=headers)
@@ -66,27 +60,79 @@ async def _get(path: str, params: Optional[Dict[str, Any]], user_id: Optional[st
         return r.json()
 
 async def _post(path: str, json_body: Dict[str, Any], user_id: Optional[str]):
-    """Makes an authenticated POST request."""
     async with httpx.AsyncClient(timeout=TIMEOUT) as cx:
         headers = _auth_headers(user_id)
         r = await cx.post(f"{BASE}{path}", json=json_body, headers=headers)
         r.raise_for_status()
         return r.json()
 
+# ---- HTTP helpers (sync) for info-only agent ----
+def _get_sync(path: str, params: Optional[Dict[str, Any]], user_id: Optional[str]) -> Any:
+    headers = _auth_headers(user_id)
+    with httpx.Client(timeout=TIMEOUT) as cx:
+        r = cx.get(f"{BASE}{path}", params=params, headers=headers)
+        r.raise_for_status()
+        return r.json()
 
+# ---- Normalizers ----
+def _normalize_services_payload(data: Any) -> List[Dict[str, Any]]:
+    """
+    Accepts either a list or dict with 'results'/ 'items'.
+    Returns a list[dict].
+    """
+    if isinstance(data, list):
+        return [x for x in data if isinstance(x, dict)]
+    if isinstance(data, dict):
+        if "results" in data and isinstance(data["results"], list):
+            return [x for x in data["results"] if isinstance(x, dict)]
+        if "items" in data and isinstance(data["items"], list):
+            return [x for x in data["items"] if isinstance(x, dict)]
+    return []
+
+def _extract_category_name(svc: Dict[str, Any], cat_map: Dict[int, str]) -> Tuple[Optional[str], Optional[int]]:
+    """
+    Try to pull a human-readable category name; also return id if present.
+    """
+    name = (svc.get("category") or svc.get("type") or svc.get("category_name"))
+    cid = svc.get("category_id")
+    # If we have only id, map to name
+    if not name and isinstance(cid, int):
+        name = cat_map.get(cid)
+    # Clean up
+    if isinstance(name, str):
+        name = name.strip()
+    return (name if name else None), (cid if isinstance(cid, int) else None)
+
+# ---- Optional: build a category map from /api/service-categories/ ----
+def _categories_map_sync(user_id: Optional[str]) -> Dict[int, str]:
+    try:
+        data = _get_sync("/api/service-categories/", None, user_id)
+        items = []
+        if isinstance(data, list):
+            items = data
+        elif isinstance(data, dict):
+            items = data.get("categories") or data.get("results") or data.get("items") or []
+        out: Dict[int, str] = {}
+        for c in items:
+            if not isinstance(c, dict):
+                continue
+            cid = c.get("id")
+            nm = c.get("name") or c.get("label") or c.get("key")
+            if isinstance(cid, int) and isinstance(nm, str) and nm.strip():
+                out[cid] = nm.strip()
+        return out
+    except Exception:
+        # If endpoint missing, return empty (we’ll still derive names from services)
+        return {}
+
+# =========================================
+# PUBLIC: async calls (your existing API)
+# =========================================
 async def list_services(user_id: Optional[str] = None, query: Optional[str] = None):
-    """
-    Fetches services from the backend. If a query is provided,
-    it is passed as a search parameter.
-    """
     params = {"q": query} if query else None
     return await _get("/api/services/", params, user_id)
 
 async def list_categories(user_id: Optional[str] = None):
-    """
-    Fetch service categories. If the endpoint is missing, fall back to deriving categories from services.
-    Returns a dict like {"categories": [{"name": "<category>"}, ...]} for consistency.
-    """
     try:
         data = await _get("/api/service-categories/", None, user_id)
         if isinstance(data, dict) and "categories" in data:
@@ -97,24 +143,26 @@ async def list_categories(user_id: Optional[str] = None):
         pass
     try:
         services = await _get("/api/services/", None, user_id) or []
-        if isinstance(services, dict) and "results" in services:
-            services = services["results"]
-        names = sorted({(svc.get("category") or svc.get("type") or "").strip()
-                        for svc in services if isinstance(svc, dict) and (svc.get("category") or svc.get("type"))})
+        items = _normalize_services_payload(services)
+        names = sorted({
+            (svc.get("category") or svc.get("type") or svc.get("category_name") or "").strip()
+            for svc in items
+            if (svc.get("category") or svc.get("type") or svc.get("category_name"))
+        })
         return {"categories": [{"name": n} for n in names if n]}
     except Exception as e:
         return {"error": str(e)}
 
-async def create_booking(user_id: str, service_id: str, full_name: str, scheduled_at: str, duration: Optional[int] = None):
-    """Creates a booking by sending data to the backend."""
-    payload = {
-        "service_id": service_id,
-        "full_name": full_name,
-        "scheduled_at": scheduled_at,
-    }
+async def create_booking(
+    user_id: str,
+    service_id: str,
+    full_name: str,
+    scheduled_at: str,
+    duration: Optional[int] = None,
+):
+    payload: Dict[str, Any] = {"service_id": service_id, "full_name": full_name, "scheduled_at": scheduled_at}
     if duration:
         payload["duration"] = duration
-    
     return await _post("/api/bookings/", payload, user_id)
 
 async def create_service(
@@ -122,7 +170,7 @@ async def create_service(
     business_name: str,
     name: str,
     description: str,
-    category_name: str, 
+    category_name: str,
     pricing_model: str,
     currency: str,
     base_price: float,
@@ -135,12 +183,10 @@ async def create_service(
     max_duration: Optional[int] = None,
     attributes: Optional[Dict[str, Any]] = None,
 ):
-    """Creates a new service by sending data to the backend."""
-    
-    category_id = CATEGORY_NAME_TO_ID.get(category_name.lower())
+    category_id = CATEGORY_NAME_TO_ID.get((category_name or "").lower())
     if category_id is None:
         return {"error": f"Category '{category_name}' not found."}
-    payload = {
+    payload: Dict[str, Any] = {
         "business_name": business_name,
         "name": name,
         "description": description,
@@ -157,6 +203,89 @@ async def create_service(
         "max_duration": max_duration,
         "attributes": attributes or {},
     }
-    # Filter out None values to send a clean payload
     payload = {k: v for k, v in payload.items() if v is not None}
     return await _post("/api/services/", payload, user_id)
+
+# =========================================
+# PUBLIC: sync hooks required by info-only agent
+# =========================================
+
+def list_services_by_category(category_key: str, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """
+    Try several server-side filters; if none return items, fetch all and filter client-side.
+    """
+    if not category_key:
+        return []
+
+    # Try to resolve id from categories endpoint (nice to have)
+    cat_map = _categories_map_sync(user_id)
+    inv_map = {v.lower(): k for k, v in cat_map.items()}
+    cid = inv_map.get(category_key.lower())
+
+    candidate_params = [
+        {"category": category_key},
+        {"category_name": category_key},
+        {"category__name": category_key},
+    ]
+    if cid is not None:
+        candidate_params.append({"category_id": cid})
+
+    # Try each filter variant until we get non-empty results
+    for p in candidate_params:
+        try:
+            data = _get_sync("/api/services/", p, user_id)
+            items = _normalize_services_payload(data)
+            if items:
+                print(f"[INFO] list_services_by_category params={p} -> {len(items)} items")
+                return items
+        except Exception as e:
+            print(f"[WARN] list_services_by_category params={p} failed: {e}")
+
+    # Fallback: pull all, then filter client-side
+    try:
+        data = _get_sync("/api/services/", None, user_id)
+    except Exception as e:
+        print(f"[ERROR] list_services_by_category fallback fetch failed: {e}")
+        return []
+
+    items = _normalize_services_payload(data)
+    if not items:
+        print("[INFO] list_services_by_category fallback: 0 items in /api/services/")
+        return []
+
+    # Build name via category fields or category_id+map and filter
+    filtered: List[Dict[str, Any]] = []
+    for svc in items:
+        name, _ = _extract_category_name(svc, cat_map)
+        if name and name.lower().strip() == category_key.lower().strip():
+            filtered.append(svc)
+
+    print(f"[INFO] list_services_by_category fallback filtered -> {len(filtered)} items")
+    return filtered
+
+def get_non_empty_categories(user_id: Optional[str] = None) -> List[str]:
+    """
+    Compute categories from the services themselves (single call, robust to payload shapes).
+    """
+    try:
+        data = _get_sync("/api/services/", None, user_id)
+    except Exception as e:
+        print(f"[ERROR] get_non_empty_categories fetch failed: {e}")
+        return []
+
+    items = _normalize_services_payload(data)
+    if not items:
+        print("[INFO] get_non_empty_categories -> no services in backend")
+        return []
+
+    cat_map = _categories_map_sync(user_id)
+    names: set[str] = set()
+
+    for svc in items:
+        name, _ = _extract_category_name(svc, cat_map)
+        if name:
+            names.add(name)
+
+    out = sorted(names)
+    print(f"[INFO] get_non_empty_categories -> {out}")
+    return out

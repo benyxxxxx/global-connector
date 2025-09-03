@@ -1,10 +1,11 @@
-# NEW FILE: app/agents/info_only_agent.py
+# app/agents/info_only_agent.py
 
 from __future__ import annotations
 from typing import List, Dict, Tuple, Protocol
 from app.telegram.render import render_service_card
 from app.telegram.ui import build_categories_keyboard
 from app.intent.recognizer import recognize_intent
+from app.agents import service_agent
 
 # In-memory pagination per chat (simple and good enough here)
 _PAGINATION: Dict[str, Dict] = {}
@@ -48,6 +49,7 @@ async def handle_message(chat_id: str, text: str, api: CatalogAPI, telegram: Tel
     # Categories
     if intent["type"] == "show_categories":
         cats = api.get_non_empty_categories()
+        print(f"[INFO] get_non_empty_categories -> {cats}")
         if not cats:
             return {"handled": True, "output": "Nothing available right now."}
         kb = build_categories_keyboard(cats, page=0)
@@ -71,7 +73,7 @@ async def handle_message(chat_id: str, text: str, api: CatalogAPI, telegram: Tel
     await telegram.send_message(chat_id, "Available categories:", reply_markup=kb)
     return {"handled": True, "output": None}
 
-async def handle_callback(chat_id: str, data: str, api: CatalogAPI, telegram: TelegramSender):
+async def handle_callback(chat_id: str, user_id: str, data: str, api: CatalogAPI, telegram: TelegramSender):
     # Category navigator
     if data.startswith("CATNAV:"):
         _, kind, page_s = data.split(":")
@@ -86,11 +88,11 @@ async def handle_callback(chat_id: str, data: str, api: CatalogAPI, telegram: Te
         # e.g. CAT:<name>:PAGE:<n>
         parts = data.split(":")
         category = parts[1]
-        items = api.list_services_by_category(category)
-        if not items:
-            return {"handled": True, "output": "Nothing available right now."}
-        _set_page(chat_id, category, 0)
-        return await _send_items_page(chat_id, items, 0, telegram)
+        message_to_llm = f"show me the available services on {category}"
+        handled, output = await service_agent.handle_message(user_id, message_to_llm, "telegram")
+        if output:
+            await telegram.send_message(chat_id, output)
+        return {"handled": True, "output": None}
 
     # Items pagination
     if data == "ITEMS:MORE":
