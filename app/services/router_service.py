@@ -1,3 +1,5 @@
+# app/services/router_service.py
+
 import os
 from typing import Optional
 import re
@@ -11,11 +13,6 @@ import inspect
 
 from app.agents import service_agent as SA
 from app.clients import backend_api as be
-
-# ⬇️ import your existing bits
-# from app.orchestrator.runtime import run_orchestrator  # <- your function that talks to LLM + tools
-# from app.db import SessionLocal
-# from app.models import Agent, Session, AgentMemory  # rename to your actual models
 
 DEFAULT_AGENT_ID = os.getenv("DEFAULT_AGENT_ID", "agent_service")
 def _normalize_text(t: str) -> str:
@@ -33,48 +30,32 @@ def _normalize_text(t: str) -> str:
 
 # --- Agent repo (DB-backed) ---
 def list_agents(db) -> list[dict]:
-    # return public/unlisted as your API expects
-    # rows = db.query(Agent).filter(Agent.is_archived == False).all()
-    # return [row.to_dict() for row in rows]
     ...
 
 def get_agent(db, agent_id: str) -> Optional[dict]:
-    # a = db.query(Agent).filter(Agent.id == agent_id).first()
-    # return a.to_dict() if a else None
     ...
 
 def create_agent(db, data: dict) -> dict:
-    # a = Agent(**data); db.add(a); db.commit(); db.refresh(a); return a.to_dict()
     ...
 
 def update_agent(db, agent_id: str, data: dict) -> dict:
-    # a = db.query(Agent).filter(Agent.id == agent_id).first(); update fields; db.commit(); return a.to_dict()
     ...
 
 def archive_agent(db, agent_id: str) -> None:
-    # a.is_archived = True; db.commit()
     ...
 
 def ensure_seed_agent(db):
-    # if not exists(DEFAULT_AGENT_ID): create a minimal default
-    # if not db.query(Agent).filter(Agent.id == DEFAULT_AGENT_ID).first():
-    #     db.add(Agent(id=DEFAULT_AGENT_ID, name="Service Agent", public=True))
-    #     db.commit()
     ...
 
 # --- Session repo (DB-backed) ---
 def get_active_agent(db, chat_id: str) -> str | None:
-    # s = db.query(Session).filter(Session.chat_id == chat_id).first()
-    # return s.agent_id if s else None
     ...
 
 def set_active_agent(db, chat_id: str, agent_id: str) -> None:
-    # upsert in your Session table
     ...
 
 # --- Memory repo (DB-backed) ---
 def add_memory(db, agent_id: str, chat_id: str, role: str, text: str):
-    # db.add(AgentMemory(agent_id=agent_id, chat_id=chat_id, role=role, text=text)); db.commit()
     ...
 
 # --- Runtime wrapper (uniform response) ---
@@ -122,7 +103,6 @@ async def handle_agent_message(chat_id: str, user_id: str, text: str, agent_id: 
         pm = t_norm
         if pm not in {"flat", "time based", "time-based"}:
             return {"handled": True, "reply": "Please enter `flat` or `time-based`.", "meta": {"agent_id": agent_id, "intent": "add_service", "mode": "guided"}}
-        # store to match backend schema (underscore)
         form["pricing_model"] = "time_based" if "time" in pm else "flat"
         sess.update_session(chat_id, {"state": "svc_create_currency", "svc_form": form})
         return {"handled": True, "reply": "Currency code? (e.g., **USD**, **NPR**)", "meta": {"agent_id": agent_id, "intent": "add_service", "mode": "guided"}}
@@ -135,14 +115,12 @@ async def handle_agent_message(chat_id: str, user_id: str, text: str, agent_id: 
     if state == "svc_create_price":
         price = t_raw.replace(",", "").strip()
         try:
-            float(price)
+            form["base_price"] = float(price)
         except Exception:
             return {"handled": True, "reply": "Please enter a valid number for Base Price.", "meta": {"agent_id": agent_id, "intent": "add_service", "mode": "guided"}}
-        form["base_price"] = price
 
-        # Submit directly to backend API (same one the orchestrator uses)
         try:
-            result = be.create_service(user_id=user_id, **form)   # may be sync or async
+            result = be.create_service(user_id=user_id, **form)
             if inspect.isawaitable(result):
                 result = await result
         except Exception as e:
@@ -150,9 +128,7 @@ async def handle_agent_message(chat_id: str, user_id: str, text: str, agent_id: 
             return {"handled": True,
                     "reply": f"Something went wrong creating the service: {e}",
                     "meta": {"agent_id": agent_id, "intent": "add_service", "error": str(e)}}
-            
 
-        # Clear state and confirm
         sess.clear_session_state(chat_id)
         human = result if isinstance(result, str) else "Service created."
         return {
@@ -163,7 +139,6 @@ async def handle_agent_message(chat_id: str, user_id: str, text: str, agent_id: 
 
 
     # ========== Start Wizard (NO '/create' here) ==========
-    # Check RAW slash commands first (normalization would break underscores)
     if t_raw in {"/add_service", "/add", "/service_add", "/new"}:
         sess.update_session(chat_id, {"state": "svc_create_business", "svc_form": {}})
         return {
@@ -172,7 +147,6 @@ async def handle_agent_message(chat_id: str, user_id: str, text: str, agent_id: 
             "meta": {"agent_id": agent_id, "intent": "add_service", "mode": "guided"},
         }
 
-    # Then check normalized phrases / glued variants
     add_re = re.compile(r"\b(add|create|new)\s*(service|services)\b", re.IGNORECASE)
     add_glue_re = re.compile(r"\b(add|create)(service|services)\b", re.IGNORECASE)
     if add_re.search(t_norm) or add_glue_re.search(t_norm):

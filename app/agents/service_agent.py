@@ -43,23 +43,23 @@ TOOLS = [
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "create_booking",
-            "description": "Books a service for a user. Requires service_id, user's full_name, and a scheduled_at time.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "service_id": {"type": "string"},
-                    "full_name": {"type": "string"},
-                    "scheduled_at": {"type": "string", "format": "date-time"},
-                    "duration": {"type": "integer"},
-                },
-                "required": ["service_id", "full_name", "scheduled_at"],
-            },
-        },
-    },
+    # {
+    #     "type": "function",
+    #     "function": {
+    #         "name": "create_booking",
+    #         "description": "Books a service for a user. Requires service_id, user's full_name, and a scheduled_at time.",
+    #         "parameters": {
+    #             "type": "object",
+    #             "properties": {
+    #                 "service_id": {"type": "string"},
+    #                 "full_name": {"type": "string"},
+    #                 "scheduled_at": {"type": "string", "format": "date-time"},
+    #                 "duration": {"type": "integer"},
+    #             },
+    #             "required": ["service_id", "full_name", "scheduled_at"],
+    #         },
+    #     },
+    # },
     {
         "type": "function",
         "function": {
@@ -88,7 +88,7 @@ TOOLS = [
 AVAILABLE_TOOLS = {
     "browse_services": be.list_services,
     "list_categories": be.list_categories,
-    "create_booking": be.create_booking,
+    # "create_booking": be.create_booking,
     "create_service": be.create_service,
 }
 

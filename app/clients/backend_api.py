@@ -104,9 +104,9 @@ def _extract_category_name(svc: Dict[str, Any], cat_map: Dict[int, str]) -> Tupl
     return (name if name else None), (cid if isinstance(cid, int) else None)
 
 # ---- Optional: build a category map from /api/service-categories/ ----
-def _categories_map_sync(user_id: Optional[str]) -> Dict[int, str]:
+async def _categories_map_async(user_id: Optional[str]) -> Dict[int, str]:
     try:
-        data = _get_sync("/api/service-categories/", None, user_id)
+        data = await _get("/api/service-categories/", None, user_id)
         items = []
         if isinstance(data, list):
             items = data
@@ -122,7 +122,6 @@ def _categories_map_sync(user_id: Optional[str]) -> Dict[int, str]:
                 out[cid] = nm.strip()
         return out
     except Exception:
-        # If endpoint missing, return empty (we’ll still derive names from services)
         return {}
 
 # =========================================
@@ -207,85 +206,53 @@ async def create_service(
     return await _post("/api/services/", payload, user_id)
 
 # =========================================
-# PUBLIC: sync hooks required by info-only agent
+# PUBLIC: ASYNC hooks for info-only agent
 # =========================================
 
-def list_services_by_category(category_key: str, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+# --- Start Correction ---
+async def list_services_by_category_async(category_key: str, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
-    Try several server-side filters; if none return items, fetch all and filter client-side.
+    Robustly fetches all services and filters them by category on the client side.
     """
     if not category_key:
         return []
-
-    # Try to resolve id from categories endpoint (nice to have)
-    cat_map = _categories_map_sync(user_id)
-    inv_map = {v.lower(): k for k, v in cat_map.items()}
-    cid = inv_map.get(category_key.lower())
-
-    candidate_params = [
-        {"category": category_key},
-        {"category_name": category_key},
-        {"category__name": category_key},
-    ]
-    if cid is not None:
-        candidate_params.append({"category_id": cid})
-
-    # Try each filter variant until we get non-empty results
-    for p in candidate_params:
-        try:
-            data = _get_sync("/api/services/", p, user_id)
-            items = _normalize_services_payload(data)
-            if items:
-                print(f"[INFO] list_services_by_category params={p} -> {len(items)} items")
-                return items
-        except Exception as e:
-            print(f"[WARN] list_services_by_category params={p} failed: {e}")
-
-    # Fallback: pull all, then filter client-side
+    
     try:
-        data = _get_sync("/api/services/", None, user_id)
-    except Exception as e:
-        print(f"[ERROR] list_services_by_category fallback fetch failed: {e}")
-        return []
+        # 1. Fetch all services
+        data = await _get("/api/services/", None, user_id)
+        items = _normalize_services_payload(data)
+        if not items:
+            return []
 
+        # 2. Build a map of category IDs to names for matching
+        cat_map = await _categories_map_async(user_id)
+
+        # 3. Filter the full list
+        filtered: List[Dict[str, Any]] = []
+        for svc in items:
+            name, _ = _extract_category_name(svc, cat_map)
+            if name and name.lower().strip() == category_key.lower().strip():
+                filtered.append(svc)
+        
+        return filtered
+
+    except Exception as e:
+        print(f"[ERROR] list_services_by_category_async failed: {e}")
+        return []
+# --- End Correction ---
+
+async def get_non_empty_categories_async(user_id: Optional[str] = None) -> List[str]:
+    try:
+        data = await _get("/api/services/", None, user_id)
+    except Exception:
+        return []
     items = _normalize_services_payload(data)
     if not items:
-        print("[INFO] list_services_by_category fallback: 0 items in /api/services/")
         return []
-
-    # Build name via category fields or category_id+map and filter
-    filtered: List[Dict[str, Any]] = []
-    for svc in items:
-        name, _ = _extract_category_name(svc, cat_map)
-        if name and name.lower().strip() == category_key.lower().strip():
-            filtered.append(svc)
-
-    print(f"[INFO] list_services_by_category fallback filtered -> {len(filtered)} items")
-    return filtered
-
-def get_non_empty_categories(user_id: Optional[str] = None) -> List[str]:
-    """
-    Compute categories from the services themselves (single call, robust to payload shapes).
-    """
-    try:
-        data = _get_sync("/api/services/", None, user_id)
-    except Exception as e:
-        print(f"[ERROR] get_non_empty_categories fetch failed: {e}")
-        return []
-
-    items = _normalize_services_payload(data)
-    if not items:
-        print("[INFO] get_non_empty_categories -> no services in backend")
-        return []
-
-    cat_map = _categories_map_sync(user_id)
+    cat_map = await _categories_map_async(user_id)
     names: set[str] = set()
-
     for svc in items:
         name, _ = _extract_category_name(svc, cat_map)
         if name:
             names.add(name)
-
-    out = sorted(names)
-    print(f"[INFO] get_non_empty_categories -> {out}")
-    return out
+    return sorted(names)

@@ -1,33 +1,29 @@
-# NEW FILE: app/intents/recognizer.py
-# Lightweight intent recognition with add-service guardrail and info-only mapping
+# app/intent/recognizer.py
+# =========================================
+# FULL FILE — Simplified and corrected logic
+# =========================================
 
 def recognize_intent(text: str) -> dict:
     t = (text or "").strip().lower()
     if not t:
         return {"type": "unknown"}
 
-    # Explicit add-service first (avoid misclassifying as browse/list)
-    if any(kw in t for kw in [
-        "add service", "add a service", "create service",
-        "добавить сервис", "добавить услугу",
-        "dodaj uslugu", "додати сервіс"
-    ]):
-        return {"type": "add_service"}
-
-    # Categories / menu trigger
+    # Explicit commands first
     if t in ("menu", "/menu", "/start", "categories", "what do you have", "what services do you have"):
         return {"type": "show_categories"}
+    
+    if any(kw in t for kw in ["add service", "create service"]):
+        return {"type": "add_service"}
 
-    # Food mapping
-    if any(w in t for w in ["food", "restaurant", "restaurants", "eat", "dining", "еда", "ресторан", "рестора"]):
-        return {"type": "browse_category", "category": "food"}
+    # If the text is a single word without spaces or slashes,
+    # it's treated as a category browse request. This is the logic
+    # that will correctly handle "/tech" after it's processed
+    # by the webhook.
+    if " " not in t and "/" not in t:
+        return {"type": "browse_category", "category": t}
 
-    # Transport mapping
-    if any(w in t for w in ["transport", "taxi", "bike", "bicycle", "scooter", "транспорт", "такси", "велосипед"]):
-        return {"type": "browse_category", "category": "transport"}
-
-    # Booking-like → info-only notice (we don't start booking)
-    if any(w in t for w in ["book", "reserve", "reservation", "delivery", "now or later", "доставка", "бронь"]):
+    # Fallback for more complex phrases
+    if any(w in t for w in ["book", "reserve", "delivery", "now or later"]):
         return {"type": "info_only_notice"}
 
     return {"type": "unknown"}
