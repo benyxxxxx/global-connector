@@ -22,8 +22,16 @@ def recognize_intent(text: str) -> dict:
     if " " not in t and "/" not in t:
         return {"type": "browse_category", "category": t}
 
+    # Hardcoded keywords for multi-word phrases
+    if any(w in t for w in ["food", "restaurant", "eat"]):
+        return {"type": "browse_category", "category": "food"}
+    if any(w in t for w in ["transport", "taxi", "bike"]):
+        return {"type": "browse_category", "category": "transport"}
+    if "tech" in t:
+        return {"type": "browse_category", "category": "tech"}
+    
     # Fallback for more complex phrases
-    if any(w in t for w in ["book", "reserve", "delivery", "now or later"]):
-        return {"type": "info_only_notice"}
+    # if any(w in t for w in ["book", "reserve", "delivery", "now or later"]):
+    #     return {"type": "info_only_notice"}
 
     return {"type": "unknown"}

@@ -1,5 +1,4 @@
-# NEW FILE: app/telegram/render.py
-
+# app/telegram/render.py
 from __future__ import annotations
 import html, re
 from typing import Dict, List, Tuple
@@ -22,6 +21,7 @@ def label_for_link(url: str) -> str:
     return "Open link"
 
 def render_service_card(item: Dict) -> str:
+    # Do NOT show IDs; show only user-facing info
     title = item.get("title") or item.get("name") or "Untitled"
     desc = item.get("description") or ""
     location = item.get("location") or item.get("address") or ""

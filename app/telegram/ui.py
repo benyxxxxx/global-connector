@@ -1,5 +1,3 @@
-# NEW FILE: app/telegram/ui.py
-
 from typing import List, Tuple
 
 PAGE_SIZE = 6  # categories per page
@@ -19,7 +17,17 @@ def build_categories_keyboard(categories: List[str], page: int = 0) -> dict:
       - CATNAV:BACK:<n> / CATNAV:MORE:<n>
     """
     shown, has_more = paginate_categories(categories, page)
-    rows = [[{"text": c, "callback_data": f"CAT:{c}:PAGE:{page}"}] for c in shown]
+
+    # 🔒 Hide admin actions from end-user menu
+    filtered: List[str] = []
+    for c in shown:
+        name = (c or "").strip().lower()
+        if name in ("add service", "cancel service"):
+            continue
+        filtered.append(c)
+
+    rows = [[{"text": c, "callback_data": f"CAT:{c}:PAGE:{page}"}] for c in filtered]
+
     nav = []
     if page > 0:
         nav.append({"text": "« Back", "callback_data": f"CATNAV:BACK:{page-1}"})
