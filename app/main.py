@@ -15,6 +15,10 @@ from app.entrypoints.http_api import router as api_router
 from app import models          # ensure models are imported so tables register
 from app import models_agents   # same for agent models
 
+from app.routes.integrations_stage_a import router as integrations_router
+from app.routes.integrations_stage_b import router as integrations_router_b
+
+
 # --- ENV VARS ---
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_WEBHOOK_URL = os.getenv(
@@ -71,3 +75,5 @@ app.include_router(agents_router)
 app.include_router(catalog_router)
 app.include_router(session_router)
 app.include_router(api_router, prefix="")
+app.include_router(integrations_router)
+app.include_router(integrations_router_b)
