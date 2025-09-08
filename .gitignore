@@ -7,3 +7,21 @@
 *.pem
 *.key
 
+
+# env & keys
+.env
+.env.*
+**/.env
+**/.env.*
+*.pem
+*.key
+
+
+# env & keys
+.env
+.env.*
+**/.env
+**/.env.*
+*.pem
+*.key
+
