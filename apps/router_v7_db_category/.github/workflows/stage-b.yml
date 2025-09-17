@@ -1,0 +1,135 @@
+import os, re, asyncio, httpx
+from typing import Optional, Dict, Any
+from fastapi import APIRouter, HTTPException, Header, Depends
+from pydantic import BaseModel
+
+router = APIRouter(prefix="/integrations/stage-b", tags=["integrations-stage-b"])
+
+# --- Optional admin header guard ---
+def _admin_guard(x_integrator_admin: Optional[str] = Header(default=None)):
+    required = os.environ.get("PROMOTE_ADMIN_TOKEN", "").strip()
+    if required and x_integrator_admin != required:
+        raise HTTPException(403, "Forbidden")
+    return True
+
+# --- Config helpers ---
+def _need(name: str) -> str:
+    v = os.environ.get(name, "").strip()
+    if not v:
+        raise RuntimeError(f"Missing required env var: {name}")
+    return v
+
+def cfg() -> Dict[str, str]:
+    return {
+        "GITHUB_API": os.environ.get("GITHUB_API", "https://api.github.com").rstrip("/"),
+        "GITHUB_TOKEN": _need("GITHUB_TOKEN"),
+        "GITHUB_REPO": _need("GITHUB_REPO"),  # e.g. "owner/repo"
+        "GITHUB_BASE": os.environ.get("GITHUB_BASE", "main"),
+    }
+
+def _headers(token: str) -> Dict[str, str]:
+    return {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+# --- Robust GitHub request with small backoff ---
+async def _request(method: str, url: str, *, headers: Dict[str, str], retries: int = 3, **kw) -> httpx.Response:
+    backoff = 0.3; last = None
+    for _ in range(retries):
+        try:
+            async with httpx.AsyncClient(timeout=kw.pop("timeout", httpx.Timeout(20))) as c:
+                r = await c.request(method, url, headers=headers, **kw)
+            if r.status_code >= 500:  # retry on 5xx
+                last = RuntimeError(f"GitHub {r.status_code}")
+                raise last
+            return r
+        except Exception as e:
+            last = e
+        await asyncio.sleep(backoff); backoff *= 2
+    raise HTTPException(502, f"GitHub request failed: {last}")
+
+# --- Helpers ---
+async def _branch_exists(c: Dict[str, str], branch: str) -> bool:
+    url = f"{c['GITHUB_API']}/repos/{c['GITHUB_REPO']}/git/ref/heads/{branch}"
+    r = await _request("GET", url, headers=_headers(c["GITHUB_TOKEN"]))
+    return r.status_code == 200
+
+async def _find_pr(c: Dict[str, str], branch: str) -> Optional[Dict[str, Any]]:
+    owner = c["GITHUB_REPO"].split("/")[0]
+    params = {"state": "all", "head": f"{owner}:{branch}", "base": c["GITHUB_BASE"], "per_page": 1}
+    url = f"{c['GITHUB_API']}/repos/{c['GITHUB_REPO']}/pulls"
+    r = await _request("GET", url, headers=_headers(c["GITHUB_TOKEN"]), params=params)
+    data = r.json()
+    return data[0] if data else None
+
+async def _create_pr(c: Dict[str, str], branch: str, title: str) -> Dict[str, Any]:
+    existing = await _find_pr(c, branch)
+    if existing: return existing
+    url = f"{c['GITHUB_API']}/repos/{c['GITHUB_REPO']}/pulls"
+    payload = {"title": title, "head": branch, "base": c["GITHUB_BASE"]}
+    r = await _request("POST", url, headers=_headers(c["GITHUB_TOKEN"]), json=payload)
+    if r.status_code in (200, 201): return r.json()
+    if r.status_code == 422:
+        pr = await _find_pr(c, branch)
+        if pr: return pr
+    raise HTTPException(502, f"Failed to create/find PR: {r.text}")
+
+async def _merge_pr(c: Dict[str, str], pr_number: int) -> Dict[str, Any]:
+    url = f"{c['GITHUB_API']}/repos/{c['GITHUB_REPO']}/pulls/{pr_number}/merge"
+    r = await _request("PUT", url, headers=_headers(c["GITHUB_TOKEN"]),
+                       json={"merge_method": "squash"}, timeout=httpx.Timeout(60))
+    if r.status_code == 200:
+        return r.json()  # {"sha": "...", "merged": true, ...}
+    if r.status_code == 405:  # already merged
+        pr_url = f"{c['GITHUB_API']}/repos/{c['GITHUB_REPO']}/pulls/{pr_number}"
+        pr = (await _request("GET", pr_url, headers=_headers(c["GITHUB_TOKEN"]))).json()
+        return {"sha": pr.get("merge_commit_sha"), "merged": True}
+    raise HTTPException(502, f"Merge failed: {r.text}")
+
+async def _create_tag(c: Dict[str, str], tag: str, sha: str) -> str:
+    url = f"{c['GITHUB_API']}/repos/{c['GITHUB_REPO']}/git/refs"
+    r = await _request("POST", url, headers=_headers(c["GITHUB_TOKEN"]),
+                       json={"ref": f"refs/tags/{tag}", "sha": sha})
+    if r.status_code in (200, 201):
+        return tag
+    if r.status_code == 422 and "Reference already exists" in r.text:
+        for i in range(2, 21):
+            t2 = f"{tag}-{i}"
+            r2 = await _request("POST", url, headers=_headers(c["GITHUB_TOKEN"]),
+                                json={"ref": f"refs/tags/{t2}", "sha": sha})
+            if r2.status_code in (200, 201):
+                return t2
+        raise HTTPException(409, "Could not create a unique tag")
+    raise HTTPException(502, f"Tag failed: {r.text}")
+
+# --- Models & route ---
+class PromoteReq(BaseModel):
+    branch: str  # e.g. "stage-a/20250915-foo"
+
+class PromoteResp(BaseModel):
+    ok: bool
+    branch: str
+    pr_number: int
+    pr_url: str
+    tag: str
+    sha: str
+
+@router.post("/promote", response_model=PromoteResp, dependencies=[Depends(_admin_guard)])
+async def promote(req: PromoteReq):
+    c = cfg()
+    if not re.match(r"^[A-Za-z0-9._\-/]+$", req.branch):
+        raise HTTPException(400, "Invalid branch")
+    if not await _branch_exists(c, req.branch):
+        raise HTTPException(404, f"Branch not found: {req.branch}")
+
+    pr = await _create_pr(c, req.branch, f"Promote {req.branch} -> {c['GITHUB_BASE']}")
+    merged = await _merge_pr(c, pr["number"])
+    sha = merged.get("sha") or pr.get("merge_commit_sha")
+    if not sha:
+        raise HTTPException(502, "Missing merge commit SHA")
+    tag = await _create_tag(c, f"release/{req.branch.replace('/', '-')}", sha)
+
+    return PromoteResp(ok=True, branch=req.branch, pr_number=pr["number"],
+                       pr_url=pr["html_url"], tag=tag, sha=sha)

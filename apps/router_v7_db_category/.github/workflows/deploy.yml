@@ -1,0 +1,59 @@
+name: deploy to Fly (dev + prod)
+
+on:
+  push:
+    branches: [ dev ]
+    tags:     [ "release/**" ]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fly-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - uses: superfly/flyctl-actions/setup-flyctl@v1
+
+      # (optional) quick debug so you can see which Fly account the token belongs to
+      - name: fly whoami
+        env:
+          # PROD token on release tags; DEV token on dev branch
+          FLY_API_TOKEN: ${{ startsWith(github.ref, 'refs/tags/release/') && secrets.FLY_API_TOKEN_PROD || secrets.FLY_API_TOKEN }}
+        run: flyctl auth whoami
+
+      - name: Deploy
+        env:
+          FLY_API_TOKEN: ${{ startsWith(github.ref, 'refs/tags/release/') && secrets.FLY_API_TOKEN_PROD || secrets.FLY_API_TOKEN }}
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/release/* ]]; then
+            # PROD path
+            if [ -f fly.prod.toml ]; then
+              flyctl deploy --config fly.prod.toml --remote-only
+            else
+              echo "Missing fly.prod.toml for prod deploy"; exit 1
+            fi
+          else
+            # DEV path
+            flyctl deploy --config ./fly.test.toml --remote-only
+          fi
+
+      - name: Health check (prod only)
+        if: startsWith(github.ref, 'refs/tags/release/')
+        env:
+          PROD_HEALTH_URL: ${{ secrets.PROD_HEALTH_URL }}
+        run: |
+          if [ -z "$PROD_HEALTH_URL" ]; then
+            echo "No PROD_HEALTH_URL; skipping health check"; exit 0
+          fi
+          for i in {1..12}; do
+            curl -fsS "$PROD_HEALTH_URL" && exit 0
+            echo "Attempt $i failed; sleeping 5s"; sleep 5
+          done
+          echo "Health probe failed"; exit 1

@@ -8,3 +8,5 @@ openai
 psycopg2-binary
 pytest
 respx
+aiogram==2.25.1
+aiohttp==3.8.6
