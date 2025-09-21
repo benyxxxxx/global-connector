@@ -106,8 +106,7 @@ async def telegram_webhook(req: Request) -> JSONResponse:
         if doc:
             # Validate .zip + size
             name = (doc.get("file_name") or "").lower()
-            if not name.endswith(".zip"):
-                await client.send_message(chat_id, "❌ Please send a .zip file.")
+            if not name.endswith((".zip", ".patch", ".diff", ".yaml", ".yml", ".json")):
                 return JSONResponse({"ok": True})
             size = int(doc.get("file_size") or 0)
             if size and size > MAX_ZIP_BYTES:
@@ -138,25 +137,49 @@ async def telegram_webhook(req: Request) -> JSONResponse:
                 await client.send_message(chat_id, "❌ ZIP too large (max 60 MB).")
                 return JSONResponse({"ok": True})
 
-            # 3) forward to Stage-A
+            # 3) forward to correct endpoint based on file type
             title = f"tg-{from_user.get('username') or 'user'}-{int(time.time())}"
-            files = {"upload": (name, zip_bytes, "application/zip")}
-            data = {"title": title}
             headers = {ADMIN_HEADER_NAME: ADMIN_HEADER_VALUE} if ADMIN_HEADER_VALUE else {}
-            async with httpx.AsyncClient(timeout=180.0) as hc3:
-                resp = await hc3.post(
-                    f"{INTEGRATOR_BASE_URL}/integrations/stage-a/submit-zip",
-                    files=files,
-                    data=data,
-                    headers=headers,
-                )
-                if resp.status_code < 300:
-                    out = resp.json()
-                    branch = out.get("branch", "(unknown)")
-                    await client.send_message(chat_id, f"✅ Stage A uploaded\nBranch: {branch}")
-                else:
-                    await client.send_message(chat_id, f"❌ Stage A error {resp.status_code}.")
-            return JSONResponse({"ok": True})
+            data = {"title": title}
+
+            # --- PATCH/DIFF HANDLING ---
+            if name.endswith((".patch", ".diff")):
+                files = {"file": (name, zip_bytes, "text/plain")}  # Use key "file"
+                
+                async with httpx.AsyncClient(timeout=180.0) as hc3:
+                    resp = await hc3.post(
+                        f"{INTEGRATOR_BASE_URL}/integrations/stage-d/submit-patch", # Correct endpoint
+                        files=files,
+                        data=data,
+                        headers=headers,
+                    )
+                    if resp.status_code < 300:
+                        out = resp.json()
+                        branch = out.get("branch", "(unknown)")
+                        await client.send_message(chat_id, f"✅ Stage D patch applied\nBranch: {branch}")
+                    else:
+                        error_details = resp.text
+                        await client.send_message(chat_id, f"❌ Stage D error {resp.status_code}.\nDetails: {error_details}")
+                return JSONResponse({"ok": True})
+
+            # --- ZIP HANDLING ---
+            if name.endswith(".zip"):
+                files = {"upload": (name, zip_bytes, "application/zip")} # Use key "upload"
+                
+                async with httpx.AsyncClient(timeout=180.0) as hc3:
+                    resp = await hc3.post(
+                        f"{INTEGRATOR_BASE_URL}/integrations/stage-a/submit-zip", # Original endpoint
+                        files=files,
+                        data=data,
+                        headers=headers,
+                    )
+                    if resp.status_code < 300:
+                        out = resp.json()
+                        branch = out.get("branch", "(unknown)")
+                        await client.send_message(chat_id, f"✅ Stage A uploaded\nBranch: {branch}")
+                    else:
+                        await client.send_message(chat_id, f"❌ Stage A error {resp.status_code}.")
+                return JSONResponse({"ok": True})
 
         # === 2) TEXT COMMANDS & DIALOG FLOW ===
         text = (msg.get("text") or "").strip()

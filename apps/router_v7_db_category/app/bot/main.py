@@ -4,14 +4,18 @@ from aiogram.utils import executor
 from bot.tg_stage_a import wire_stage_a
 from bot.tg_stage_b import wire_stage_b
 from bot.commands_public import PUBLIC_COMMANDS
+from bot.tg_stage_d import wire_stage_d
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
+
+wire_stage_d(dp, BOT_TOKEN)
+
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN env var is required")
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
-
+wire_stage_d(dp, BOT_TOKEN)
 @dp.message_handler(commands=["start"])
 async def _start(msg: types.Message):
     await msg.reply(
