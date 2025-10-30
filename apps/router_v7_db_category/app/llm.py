@@ -1,44 +1,41 @@
 import os
-import json
-from typing import Dict, List
-from openai import AsyncOpenAI
+import logging
+from typing import Any, Dict, List, Optional
+import openai
 
-# Read OpenRouter configuration from environment variables
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-OPENROUTER_SITE_URL = os.getenv("OPENROUTER_SITE_URL")
-OPENROUTER_SITE_NAME = os.getenv("OPENROUTER_SITE_NAME")
-LLM_MODEL = os.getenv("LLM_MODEL")
-LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.1"))
+logger = logging.getLogger(__name__)
 
 class LLMClient:
-    def __init__(self):
-        if not OPENROUTER_API_KEY:
-            raise RuntimeError("OPENROUTER_API_KEY is not set in the .env file.")
-        
-        self.client = AsyncOpenAI(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=OPENROUTER_API_KEY,
-        )
+    def __init__(self, model_name: Optional[str] = None, temperature: Optional[float] = None):
+        self.model_name = model_name or os.getenv("LLM_MODEL", "openai/gpt-4o-mini")
+        self.temperature = temperature if temperature is not None else float(os.getenv("LLM_TEMPERATURE", 0.7))
+        self.client = None
 
-    async def get_agent_response(self, messages: List[Dict], tools: List[Dict]) -> Dict:
-        """
-        Gets a response from the LLM, potentially including a tool call.
-        """
+        # --- START CORRECTION ---
+        # Check for the presence of the OPENROUTER_API_KEY environment variable
+        # to determine which client to use.
+        if os.getenv("OPENROUTER_API_KEY"):
+            logger.info("Using OpenRouter client.")
+            self.client = openai.AsyncOpenAI(
+                base_url=os.getenv("OPENROUTER_SITE_URL"),
+                api_key=os.getenv("OPENROUTER_API_KEY"),
+            )
+        else:
+            logger.info("Using OpenAI client.")
+            self.client = openai.AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        # --- END CORRECTION ---
+
+    async def get_agent_response(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None) -> Any:
+        if not self.client:
+            raise ValueError("LLM client not initialized")
         try:
-            completion = await self.client.chat.completions.create(
-                model=LLM_MODEL,
-                temperature=LLM_TEMPERATURE,
-                extra_headers={
-                    "HTTP-Referer": OPENROUTER_SITE_URL,
-                    "X-Title": OPENROUTER_SITE_NAME,
-                },
+            response = await self.client.chat.completions.create(
+                model=self.model_name,
                 messages=messages,
                 tools=tools,
-                tool_choice="auto"
+                temperature=self.temperature,
             )
-            return completion.choices[0].message
-            
+            return response.choices[0].message
         except Exception as e:
-            print(f"❌ LLM request failed: {e}")
-            # Return a valid message object on failure
-            return {"role": "assistant", "content": "I'm sorry, I encountered an error."}
+            logger.exception("Error getting LLM response: %s", e)
+            return f"Error: {e}"

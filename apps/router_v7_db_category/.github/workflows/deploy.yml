@@ -1,0 +1,69 @@
+name: Deploy to Fly (dev + prod + manual)
+
+on:
+  # Your existing triggers
+  push:
+    branches: [ dev ]
+    tags:     [ "release/**" ]
+  
+  # Trigger for the /resetbot command
+  workflow_dispatch:
+    inputs:
+      fly_config:
+        description: 'Fly config file to use (e.g., fly.test.toml)'
+        required: true
+        default: 'fly.test.toml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fly-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: superfly/flyctl-actions/setup-flyctl@v1
+
+      - name: Determine Environment and Config
+        id: context
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/release/* ]]; then
+            echo "env=prod" >> $GITHUB_OUTPUT
+            echo "config=fly.prod.toml" >> $GITHUB_OUTPUT
+            echo "token=${{ secrets.FLY_API_TOKEN_PROD }}" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "env=manual" >> $GITHUB_OUTPUT
+            echo "config=${{ github.event.inputs.fly_config }}" >> $GITHUB_OUTPUT
+            echo "token=${{ secrets.FLY_API_TOKEN }}" >> $GITHUB_OUTPUT
+          else
+            echo "env=dev" >> $GITHUB_OUTPUT
+            echo "config=fly.test.toml" >> $GITHUB_OUTPUT
+            echo "token=${{ secrets.FLY_API_TOKEN }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Deploy
+        env:
+          FLY_API_TOKEN: ${{ steps.context.outputs.token }}
+        run: |
+          echo "Deploying environment: ${{ steps.context.outputs.env }}"
+          echo "Using config: ${{ steps.context.outputs.config }}"
+          flyctl deploy --config "${{ steps.context.outputs.config }}" --remote-only --detach
+
+      - name: Health check (prod only)
+        if: steps.context.outputs.env == 'prod'
+        env:
+          PROD_HEALTH_URL: ${{ secrets.PROD_HEALTH_URL }}
+        run: |
+          if [ -z "$PROD_HEALTH_URL" ]; then
+            echo "No PROD_HEALTH_URL; skipping health check"; exit 0
+          fi
+          for i in {1..12}; do
+            curl -fsS "$PROD_HEALTH_URL" && exit 0
+            echo "Attempt $i failed; sleeping 5s"; sleep 5
+          done
+          echo "Health probe failed"; exit 1
