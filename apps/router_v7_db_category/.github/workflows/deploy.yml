@@ -1,9 +1,18 @@
-name: deploy to Fly (dev + prod)
+name: Deploy to Fly (dev + prod + manual)
 
 on:
+  # Your existing triggers
   push:
     branches: [ dev ]
     tags:     [ "release/**" ]
+  
+  # Trigger for the /resetbot command
+  workflow_dispatch:
+    inputs:
+      fly_config:
+        description: 'Fly config file to use (e.g., fly.test.toml)'
+        required: true
+        default: 'fly.test.toml'
 
 permissions:
   contents: write
@@ -17,35 +26,36 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
 
       - uses: superfly/flyctl-actions/setup-flyctl@v1
 
-      # (optional) quick debug so you can see which Fly account the token belongs to
-      - name: fly whoami
-        env:
-          # PROD token on release tags; DEV token on dev branch
-          FLY_API_TOKEN: ${{ startsWith(github.ref, 'refs/tags/release/') && secrets.FLY_API_TOKEN_PROD || secrets.FLY_API_TOKEN }}
-        run: flyctl auth whoami
+      - name: Determine Environment and Config
+        id: context
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/release/* ]]; then
+            echo "env=prod" >> $GITHUB_OUTPUT
+            echo "config=fly.prod.toml" >> $GITHUB_OUTPUT
+            echo "token=${{ secrets.FLY_API_TOKEN_PROD }}" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "env=manual" >> $GITHUB_OUTPUT
+            echo "config=${{ github.event.inputs.fly_config }}" >> $GITHUB_OUTPUT
+            echo "token=${{ secrets.FLY_API_TOKEN }}" >> $GITHUB_OUTPUT
+          else
+            echo "env=dev" >> $GITHUB_OUTPUT
+            echo "config=fly.test.toml" >> $GITHUB_OUTPUT
+            echo "token=${{ secrets.FLY_API_TOKEN }}" >> $GITHUB_OUTPUT
+          fi
 
       - name: Deploy
         env:
-          FLY_API_TOKEN: ${{ startsWith(github.ref, 'refs/tags/release/') && secrets.FLY_API_TOKEN_PROD || secrets.FLY_API_TOKEN }}
+          FLY_API_TOKEN: ${{ steps.context.outputs.token }}
         run: |
-          if [[ "${GITHUB_REF}" == refs/tags/release/* ]]; then
-            # PROD path
-            if [ -f fly.prod.toml ]; then
-              flyctl deploy --config fly.prod.toml --remote-only
-            else
-              echo "Missing fly.prod.toml for prod deploy"; exit 1
-            fi
-          else
-            # DEV path
-            flyctl deploy --config ./fly.test.toml --remote-only
-          fi
+          echo "Deploying environment: ${{ steps.context.outputs.env }}"
+          echo "Using config: ${{ steps.context.outputs.config }}"
+          flyctl deploy --config "${{ steps.context.outputs.config }}" --remote-only --detach
 
       - name: Health check (prod only)
-        if: startsWith(github.ref, 'refs/tags/release/')
+        if: steps.context.outputs.env == 'prod'
         env:
           PROD_HEALTH_URL: ${{ secrets.PROD_HEALTH_URL }}
         run: |

@@ -19,6 +19,7 @@ from app.agent_models import AgentCreateRequest
 from app.services import router_service as ROUTER
 from app.agents import info_only_agent as INFO
 from app.clients import backend_api as be  # used for category list
+from app.services.github_service import trigger_deployment_workflow
 
 router = APIRouter()
 
@@ -33,6 +34,7 @@ ADMIN_HEADER_NAME = "X-Integrator-Admin"
 ADMIN_HEADER_VALUE = os.getenv("PROMOTE_ADMIN_TOKEN", "").strip()
 MAX_ZIP_BYTES = 60 * 1024 * 1024  # 60 MB
 
+ADMIN_IDS = [int(i) for i in os.environ.get("BOT_ADMIN_IDS", "").split(",") if i]
 
 def _tg_api(method: str) -> str:
     if not BOT_TOKEN:
@@ -48,6 +50,7 @@ async def telegram_webhook(req: Request) -> JSONResponse:
       • If message is `/promote stage-a/<branch>` → POST to Stage-B.
       • Else: fall back to your existing menu/agent/session logic.
     """
+    
     chat_id: Optional[str] = None
     output = ""
 
@@ -183,8 +186,22 @@ async def telegram_webhook(req: Request) -> JSONResponse:
 
         # === 2) TEXT COMMANDS & DIALOG FLOW ===
         text = (msg.get("text") or "").strip()
-        if not text:
-            # non-text, non-document messages: ignore
+        if text.lower().startswith("/resetbot"):
+            # if user_id not in ADMIN_IDS: # <--- THIS LINE IS COMMENTED OUT
+            #     await client.send_message(chat_id, "🚫 You are not authorized for this command.")
+            #     return JSONResponse({"ok": True})
+            
+            args = text.split(maxsplit=1)
+            fly_config = args[1] if len(args) > 1 else "fly.test.toml"
+
+            await client.send_message(chat_id, f"🚀 Triggering deployment with `{fly_config}`...")
+            run_url = await trigger_deployment_workflow(fly_config=fly_config)
+
+            if run_url:
+                await client.send_message(chat_id, f"✅ Workflow started. Track progress here:\n{run_url}", disable_web_page_preview=True)
+            else:
+                await client.send_message(chat_id, "❌ Failed to trigger deployment. Check bot logs.")
+            
             return JSONResponse({"ok": True})
 
         print(f"📥 Incoming message from user {user_id} in chat {chat_id}: {text}")
