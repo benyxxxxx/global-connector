@@ -7,11 +7,11 @@ from typing import List, Optional, Dict, Any, Iterable
 from pydantic import ValidationError
 from sqlalchemy import select
 from app.db import SessionLocal
-from app.agent_models import (
+from app.models.agent_pydantic_models import (
     Agent, AgentCreateRequest, AgentUpdateRequest,
     TeachRequest, MemoryRecord
 )
-from app.models_agents import AgentDB, AgentMemoryDB
+from app.models.models_agents import AgentDB, AgentMemoryDB
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)

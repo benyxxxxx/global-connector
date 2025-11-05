@@ -3,7 +3,7 @@ from typing import Optional, List
 from fastapi import APIRouter, Query
 
 from app.core import agent_manager as mgr
-from app.agent_models import Agent
+from app.models.agent_pydantic_models import Agent
 
 router = APIRouter(prefix="/catalog", tags=["catalog"])
 
