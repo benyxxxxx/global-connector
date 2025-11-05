@@ -6,6 +6,7 @@ import re
 import time
 from typing import Any, Dict, Optional
 
+
 import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -20,9 +21,12 @@ from app.services import router_service as ROUTER
 from app.agents import info_only_agent as INFO
 from app.clients import backend_api as be  # used for category list
 from app.services.github_service import trigger_deployment_workflow
+from app.clients import backend_api as be  # used for category list
+from app.services.github_service import trigger_deployment_workflow
 
 router = APIRouter()
 
+# --- existing envs (kept) ---
 # --- existing envs (kept) ---
 WEBHOOK_SECRET   = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
 DEFAULT_AGENT_ID = os.getenv("DEFAULT_AGENT_ID")
@@ -52,9 +56,19 @@ async def telegram_webhook(req: Request) -> JSONResponse:
     """
     
     chat_id: Optional[str] = None
+    """
+    Telegram webhook:
+      • If message has a ZIP (document) → download from Telegram → POST to Stage-A.
+      • If message is `/promote stage-a/<branch>` → POST to Stage-B.
+      • Else: fall back to your existing menu/agent/session logic.
+    """
+    
+    chat_id: Optional[str] = None
     output = ""
 
+
     try:
+        # Optional: verify secret header (Telegram will send X-Telegram-Bot-Api-Secret-Token if you set it)
         # Optional: verify secret header (Telegram will send X-Telegram-Bot-Api-Secret-Token if you set it)
         if WEBHOOK_SECRET:
             if req.headers.get("X-Telegram-Bot-Api-Secret-Token") != WEBHOOK_SECRET:
@@ -68,6 +82,8 @@ async def telegram_webhook(req: Request) -> JSONResponse:
         client = TelegramClient()
 
         # --- Handle callback_query (unchanged flow) ---
+
+        # --- Handle callback_query (unchanged flow) ---
         if "callback_query" in update:
             callback_query = update["callback_query"]
             chat_id = str(callback_query["message"]["chat"]["id"])
@@ -76,10 +92,14 @@ async def telegram_webhook(req: Request) -> JSONResponse:
             msg = callback_query["message"]
 
             # best-effort ack
+
+            # best-effort ack
             try:
                 await client.answer_callback_query(callback_query["id"])
             except Exception:
                 pass
+
+            # let your info-only agent handle inline callbacks first
 
             # let your info-only agent handle inline callbacks first
             info_cb = await INFO.handle_callback(str(chat_id), user_id, data, client)
@@ -87,6 +107,8 @@ async def telegram_webhook(req: Request) -> JSONResponse:
                 if info_cb.get("output"):
                     await client.send_message(chat_id, info_cb["output"])
                 return JSONResponse({"ok": True})
+
+            # if not handled, treat callback data as a text command
 
             # if not handled, treat callback data as a text command
             text = data
@@ -210,9 +232,34 @@ async def telegram_webhook(req: Request) -> JSONResponse:
                 await client.send_message(chat_id, "❌ Failed to trigger deployment. Check bot logs.")
             
             return JSONResponse({"ok": True})
+        # === 2) TEXT COMMANDS & DIALOG FLOW ===
+        text = (msg.get("text") or "").strip()
+        if text.lower().startswith("/resetbot"):
+            # if user_id not in ADMIN_IDS: # <--- THIS LINE IS COMMENTED OUT
+            #     await client.send_message(chat_id, "🚫 You are not authorized for this command.")
+            #     return JSONResponse({"ok": True})
+            
+            args = text.split(maxsplit=1)
+            fly_config = args[1] if len(args) > 1 else "fly.test.toml"
+
+            await client.send_message(chat_id, f"🚀 Triggering deployment with `{fly_config}`...")
+            run_url = await trigger_deployment_workflow(fly_config=fly_config)
+
+            if run_url:
+                await client.send_message(chat_id, f"✅ Workflow started. Track progress here:\n{run_url}", disable_web_page_preview=True)
+            else:
+                await client.send_message(chat_id, "❌ Failed to trigger deployment. Check bot logs.")
+            
+            return JSONResponse({"ok": True})
 
         print(f"📥 Incoming message from user {user_id} in chat {chat_id}: {text}")
 
+        # Fast path: /promote stage-a/<branch>
+        if text.lower().startswith("/promote "):
+            branch = text.split(" ", 1)[1].strip()
+            return await _do_promote(branch, chat_id, client)
+
+        # If we're in a router "create service" flow
         # Fast path: /promote stage-a/<branch>
         if text.lower().startswith("/promote "):
             branch = text.split(" ", 1)[1].strip()
@@ -240,6 +287,8 @@ async def telegram_webhook(req: Request) -> JSONResponse:
                 if info_resp and info_resp.get("output"):
                     await client.send_message(chat_id, info_resp["output"], reply_to_message_id=msg.get("message_id"))
                 return JSONResponse({"ok": True})
+
+            # Menu / discovery
 
             # Menu / discovery
             if (

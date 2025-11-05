@@ -3,7 +3,11 @@ import aiohttp
 from aiogram import types
 from aiogram.dispatcher import Dispatcher
 
+<<<<<<< HEAD
 INTEGRATOR_BASE_URL = os.environ.get("INTEGRATOR_BASE_URL", "http://127.0.0.1:8080")
+=======
+INTEGRATOR_BASE_URL = os.environ.get("INTEGRATOR_BASE_URL", "http://localhost:8000")
+>>>>>>> dev
 ADMIN_HEADER_NAME   = "X-Integrator-Admin"
 ADMIN_HEADER_VALUE  = os.environ.get("PROMOTE_ADMIN_TOKEN", "")
 
