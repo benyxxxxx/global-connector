@@ -51,14 +51,15 @@ if SessionStore is None:
 _agent_debug = []
 
 try:
-    from app.core.agent_manager import AgentManager  # type: ignore
+    from app.core import agent_manager as agents_mgr
+    agents = agents_mgr
     _agent_debug.append("Imported AgentManager from app.core.agent_manager")
 except Exception as e:
     _agent_debug.append(f"AgentManager not found: {e}; using DB fallback")
     # Generic DB fallback using your SQLAlchemy Agent model
     from typing import Any, Dict, List, Optional
     from sqlalchemy.orm import Session
-    from app import models_agents as ma  # expects ma.Agent model
+    from app.models import models_agents as ma  # expects ma.Agent model
 
     class AgentManager:  # type: ignore
         def _row_to_dict(self, row: Any) -> Dict[str, Any]:
@@ -94,6 +95,7 @@ except Exception as e:
             if hasattr(r, "is_archived"):
                 setattr(r, "is_archived", True); db.commit(); return True
             db.delete(r); db.commit(); return True
+    agents = AgentManager()
 
 # -----------------------------
 # Runtime wrapper (your orchestrator)
@@ -102,7 +104,7 @@ from app.services.router_service import handle_agent_message
 
 router = APIRouter()
 
-agents = AgentManager()
+# agents = AgentManager()
 sessions = SessionStore()  # type: ignore
 
 

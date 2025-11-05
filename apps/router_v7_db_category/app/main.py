@@ -12,12 +12,16 @@ from app.routes.agents_api import router as agents_router
 from app.routes.catalog_api import router as catalog_router
 from app.routes.session_api import router as session_router
 from app.entrypoints.http_api import router as api_router
-from app import models          # ensure models are imported so tables register
-from app import models_agents   # same for agent models
-from app.routes.integrations_stage_d import router as integrator_stage_d_router
+from app.models import main_models as models          
+from app.models import agent_pydantic_models as models_agents 
 
+from app.routes.integrations_stage_d import router as integrator_stage_d_router
 from app.routes.integrations_stage_a import router as integrations_router
 from app.routes.integrations_stage_b import router as integrations_router_b
+from app.routes.services_import import router as services_import_router
+
+# --- ADD THIS IMPORT (from patch) ---
+from app.routes.tg_services_add_bridge import router as tg_services_add_router
 
 
 # --- ENV VARS ---
@@ -51,23 +55,18 @@ async def set_telegram_webhook():
 # --- STARTUP HOOK ---
 @app.on_event("startup")
 async def startup():
-    # Delay to let networking settle (useful on Fly.io / Docker)
     await asyncio.sleep(2)
 
-    # Create DB tables if not using Alembic migrations yet
     try:
         Base.metadata.create_all(bind=engine)
         print("✅ Database tables ensured")
     except Exception as e:
         print("❌ Failed to create DB tables:", e)
-
-    # Attempt webhook setup
     try:
         await set_telegram_webhook()
     except Exception as e:
         print(f"❌ Webhook setup failed: {e}")
 
-# --- ROUTERS ---
 app.include_router(health_router)
 app.include_router(route_router)
 app.include_router(intent_router)
@@ -79,3 +78,5 @@ app.include_router(api_router, prefix="")
 app.include_router(integrations_router)
 app.include_router(integrations_router_b)
 app.include_router(integrator_stage_d_router)
+app.include_router(services_import_router)
+app.include_router(tg_services_add_router)

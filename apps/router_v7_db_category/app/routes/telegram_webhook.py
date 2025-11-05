@@ -9,13 +9,13 @@ from typing import Any, Dict, Optional
 import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
-
+import json
 # --- your existing imports (kept) ---
 from app.agents.service_agent import handle_message
 from app.integrations.telegram import TelegramClient
 from app.core import session_store as sess
 from app.core import agent_manager as agents_mgr
-from app.agent_models import AgentCreateRequest
+from app.models.agent_pydantic_models import AgentCreateRequest
 from app.services import router_service as ROUTER
 from app.agents import info_only_agent as INFO
 from app.clients import backend_api as be  # used for category list
@@ -29,7 +29,7 @@ DEFAULT_AGENT_ID = os.getenv("DEFAULT_AGENT_ID")
 
 # --- NEW: envs required for webhook ZIP + promote bridge ---
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()  # BotFather token
-INTEGRATOR_BASE_URL = os.getenv("INTEGRATOR_BASE_URL", "http://localhost:8080").rstrip("/")
+INTEGRATOR_BASE_URL = os.getenv("INTEGRATOR_BASE_URL", "http://127.0.0.1:8080").rstrip("/")
 ADMIN_HEADER_NAME = "X-Integrator-Admin"
 ADMIN_HEADER_VALUE = os.getenv("PROMOTE_ADMIN_TOKEN", "").strip()
 MAX_ZIP_BYTES = 60 * 1024 * 1024  # 60 MB
@@ -60,7 +60,11 @@ async def telegram_webhook(req: Request) -> JSONResponse:
             if req.headers.get("X-Telegram-Bot-Api-Secret-Token") != WEBHOOK_SECRET:
                 return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
 
-        update: Dict[str, Any] = await req.json()
+        body = await req.body()
+        if not body:
+            return JSONResponse({"ok": True, "info": "empty_request"})
+        
+        update: Dict[str, Any] = json.loads(body)
         client = TelegramClient()
 
         # --- Handle callback_query (unchanged flow) ---
@@ -110,6 +114,8 @@ async def telegram_webhook(req: Request) -> JSONResponse:
             # Validate .zip + size
             name = (doc.get("file_name") or "").lower()
             if not name.endswith((".zip", ".patch", ".diff", ".yaml", ".yml", ".json")):
+                print(f"❌ Rejected file from {user_id}: {name}")
+                await client.send_message(chat_id, "❌ File ignored. Must be a .zip, .patch, .diff, .yaml, or .json file.")
                 return JSONResponse({"ok": True})
             size = int(doc.get("file_size") or 0)
             if size and size > MAX_ZIP_BYTES:
@@ -181,7 +187,8 @@ async def telegram_webhook(req: Request) -> JSONResponse:
                         branch = out.get("branch", "(unknown)")
                         await client.send_message(chat_id, f"✅ Stage A uploaded\nBranch: {branch}")
                     else:
-                        await client.send_message(chat_id, f"❌ Stage A error {resp.status_code}.")
+                        # error is coming form here
+                        await client.send_message(chat_id, f"❌ Stage A and error {resp.status_code}.")
                 return JSONResponse({"ok": True})
 
         # === 2) TEXT COMMANDS & DIALOG FLOW ===

@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 
 from app.security import require_router_secret as _require_secret 
 
-from app.agent_models import (
+from app.models.agent_pydantic_models import (
     Agent, AgentCreateRequest, AgentUpdateRequest,
     TeachRequest, ToolExecRequest, MemoryRecord
 )

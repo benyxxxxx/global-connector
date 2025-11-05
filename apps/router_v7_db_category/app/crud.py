@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session as DbSession
-from . import models
+from app.models import main_models as models
 
 def get_session(db: DbSession, chat_id: str):
     return db.query(models.Session).filter(models.Session.chat_id == chat_id).first()
