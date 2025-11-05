@@ -4,7 +4,8 @@ from __future__ import annotations
 from typing import List, Dict, Tuple, Protocol
 from app.telegram.render import render_service_card
 from app.telegram.ui import build_categories_keyboard
-from app.intent.recognizer import recognize_intent
+# Updated import to use the new intent engine
+from app.intent.engine import decide_intent
 from app.clients import backend_api as be
 
 # In-memory pagination per chat (simple and good enough here)
@@ -24,15 +25,18 @@ class TelegramSender(Protocol):
                            reply_to_message_id: int|None=None) -> bool: ...
 
 async def handle_message(chat_id: str, text: str, telegram: TelegramSender):
-    intent = recognize_intent(text)
+    # Updated to call the new async decide_intent function
+    intent = await decide_intent(text)
 
-    if intent["type"] == "add_service":
+    intent_type = intent.get("intent")
+
+    if intent_type == "add_service":
         return {"handled": True, "output": "Okay, let’s add a service. Send JSON or follow the prompts."}
 
-    if intent["type"] == "info_only_notice":
+    if intent_type == "info_only_notice":
         return {"handled": True, "output": "Currently we only provide information. Booking isn’t available."}
 
-    if intent["type"] == "show_categories":
+    if intent_type == "show_categories" or intent_type == "menu":
         cats = await be.get_non_empty_categories_async()
         if not cats:
             return {"handled": True, "output": "Nothing available right now."}
@@ -40,8 +44,8 @@ async def handle_message(chat_id: str, text: str, telegram: TelegramSender):
         await telegram.send_message(chat_id, "Available categories:", reply_markup=kb)
         return {"handled": True, "output": None}
 
-    if intent["type"] == "browse_category":
-        cat = intent.get("category") or ""
+    if intent_type == "browse_category":
+        cat = intent.get("slots", {}).get("category") or intent.get("intent") or ""
         items = await be.list_services_by_category_async(cat)
         if not items:
             return {"handled": True, "output": "Nothing available right now."}

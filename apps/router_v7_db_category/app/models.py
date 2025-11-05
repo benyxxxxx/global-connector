@@ -13,3 +13,8 @@ class Booking(Base):
     currency = Column(String, nullable=True)
     attributes = Column(JSON, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
+
+class Session(Base):
+    __tablename__ = "sessions"
+    chat_id = Column(String, primary_key=True, index=True)
+    data = Column(JSON, default={})

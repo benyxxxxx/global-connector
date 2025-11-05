@@ -101,7 +101,9 @@ async def _run_tool(fn: Any, user_id: str, payload: Dict[str, Any]) -> Any:
         logger.exception("Tool execution failed (%s): %s", getattr(fn, "__name__", "tool"), e)
         return {"error": str(e)}
 
-async def handle_message(user_id: str, text: str, channel: str = "http") -> Tuple[bool, str]:
+async def handle_message(
+    user_id: str, text: str, channel: str = "http", agent_id: str | None = None
+) -> Tuple[bool, str]:
     messages = CHAT_HISTORY.setdefault(user_id, [])
     if not messages or messages[0].get("role") != "system":
         messages.insert(0, {"role": "system", "content": SYS_PROMPT})

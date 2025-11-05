@@ -1,0 +1,71 @@
+name: Stage C — Release & Verify
+
+on:
+  push:
+    tags: [ "release/**" ]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "release tag (e.g. release/stage-a-YYYYMMDD-slug)"
+        required: false
+      deploy_prod:
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: stage-c-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      PROD_HEALTH_URL: ${{ secrets.PROD_HEALTH_URL }}
+      FLY_API_TOKEN:   ${{ secrets.FLY_API_TOKEN_PROD }}
+      FLY_APP:         ${{ vars.FLY_APP }}
+      GH_TOKEN:        ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Tag: ${{ steps.tag.outputs.tag }}"
+
+      - name: Setup Flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy to Fly PROD
+        env: { FLY_API_TOKEN: ${{ env.FLY_API_TOKEN }} }
+        run: |
+          if [ -n "$FLY_APP" ]; then
+            flyctl deploy -a "$FLY_APP" --remote-only
+          elif [ -f fly.prod.toml ]; then
+            flyctl deploy --config fly.prod.toml --remote-only
+          else
+            echo "No FLY_APP and no fly.prod.toml; skipping deploy"; exit 0
+
+      - name: Health check (prod)
+        run: |
+          if [ -z "$PROD_HEALTH_URL" ]; then echo "No PROD_HEALTH_URL; skip"; exit 0; fi
+          for i in {1..12}; do
+            curl -fsS "$PROD_HEALTH_URL" && exit 0
+            echo "Attempt $i failed; sleep 5s"; sleep 5
+          done
+          echo "Prod health failed"; exit 1
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with: { tag_name: ${{ steps.tag.outputs.tag }}, generate_release_notes: true }
+        env: { GITHUB_TOKEN: ${{ env.GH_TOKEN }} }
